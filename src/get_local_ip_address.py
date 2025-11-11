@@ -1,12 +1,13 @@
-import subprocess
-import re
+import socket
 
 def get_local_ip_address():
-    ip_pattern = r'IPv4 Address[.\s]*:\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
-    scan_result=subprocess.check_output(['ipconfig'], text=True)
-    matching=re.search(ip_pattern,scan_result)
-    #re.search(pattern, string)
-    return matching.group(1)
+    # Option 1: via socket (more reliable cross-platform)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(("8.8.8.8", 80))
+    local_ip = s.getsockname()[0]
+    s.close()
+    return local_ip
 
-if __name__ == "__main__":
+if __name__=="main":
     get_local_ip_address()
+
