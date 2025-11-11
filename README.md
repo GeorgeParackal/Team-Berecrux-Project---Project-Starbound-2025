@@ -44,3 +44,7 @@ Make sure you are using the right interpreter by
 - [x] Scan for New/Unknown Devices/Alerts on a new device/Unanaswered Packets
 - [ ] Frontend UI, user should not have to replace anything within code or find there IPv4 address 
 - [ ] Raspberry Pi OS localization
+
+### feature 1 and 3
+- device discovery and fingerprinting work with get local ip add file and network scan file
+
