@@ -31,7 +31,8 @@ columns = ("MAC", "Vendor", "IP")
 tree = ttk.Treeview(root, columns=columns, show="headings")
 for col in columns:
     tree.heading(col, text=col)
-    tree.column(col, width=180 if col == "Vendor" else 170, anchor="w")
+    tree.column(col, width=180 if col == "Vendor" else 170, anchor="center")
+
 tree.pack(fill="both", expand=True)
 
 start_button = ttk.Button(root, text="Start Scan", command=start_scan)
