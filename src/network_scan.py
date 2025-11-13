@@ -4,20 +4,41 @@ from ipaddress import IPv4Interface
 import socket
 import time
 
-def run_scan(callback=None, stop_event=None):
-    """Run the network scan, optionally sending results to a callback."""
+# Vendor lookup (requires: pip install manuf)
+try:
+    from manuf import manuf
+    _parser = manuf.MacParser()
+    def _vendor(mac):
+        return _parser.get_manuf(mac) or _parser.get_manuf_long(mac) or "unknown"
+except Exception:
+    def _vendor(mac):
+        return "unknown"
+
+def run_scan(callback=None):
+    """Continuously scans the local network and sends results to callback."""
     try:
         count = 0
-        while not (stop_event and stop_event.is_set()):
+        while True:
             hostname = socket.gethostname()
             host_ip_address = host_ip.get_local_ip_address()
             network = str(IPv4Interface(host_ip_address + '/24').network)
-            ans, _ = scapy.arping(network, verbose=False)
 
+            try:
+                ans, _ = scapy.arping(network, timeout=2, retry=1, verbose=False)
+            except Exception as e:
+                if callback:
+                    callback("error", "scan_failed", str(e))
+                time.sleep(5)
+                continue
+
+            seen = set()
             for _, rcv in ans:
                 mac = rcv.hwsrc
                 ip = rcv.psrc
-                vendor = "unknown"
+                if (mac, ip) in seen:
+                    continue
+                seen.add((mac, ip))
+                vendor = _vendor(mac)
                 if callback:
                     callback(mac, vendor, ip)
                 else:
@@ -30,5 +51,4 @@ def run_scan(callback=None, stop_event=None):
         print(f"Program terminated, scan was ran: {count} times")
 
 if __name__ == "__main__":
-    # Run only if this file is executed directly
     run_scan()
