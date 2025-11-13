@@ -12,6 +12,9 @@ q = queue.Queue()
 scan_thread = None
 stop_event = threading.Event()
 
+# Track devices by MAC address
+known_devices = {}
+
 def on_new_device(mac, vendor, ip):
     q.put((mac, vendor, ip))
 
@@ -19,7 +22,18 @@ def poll_queue():
     try:
         while True:
             mac, vendor, ip = q.get_nowait()
-            tree.insert("", "end", values=(mac, vendor, ip))
+
+            if mac in known_devices:
+                # Update existing item if IP or vendor changed
+                item_id = known_devices[mac]
+                current_values = tree.item(item_id, "values")
+                if current_values != (mac, vendor, ip):
+                    tree.item(item_id, values=(mac, vendor, ip))
+            else:
+                # Add new device
+                item_id = tree.insert("", "end", values=(mac, vendor, ip))
+                known_devices[mac] = item_id
+
     except queue.Empty:
         pass
     # Re-enable Start when thread finishes
