@@ -1,18 +1,16 @@
-import threading
-import queue
-import tkinter as tk
+import threading, queue, tkinter as tk
 from tkinter import ttk
 import importlib, inspect, network_scan
 
-# --- Force reload the correct network_scan module ---
+# Force-reload so we use the latest scanner code
 importlib.reload(network_scan)
 print("Using:", network_scan.__file__)
 print("run_scan signature:", inspect.signature(network_scan.run_scan))
+run_scan = network_scan.run_scan
 
-run_scan = network_scan.run_scan  # Bind the correct function
-
-# --- GUI setup ---
 q = queue.Queue()
+scan_thread = None
+stop_event = threading.Event()
 
 def on_new_device(mac, vendor, ip):
     q.put((mac, vendor, ip))
@@ -24,27 +22,50 @@ def poll_queue():
             tree.insert("", "end", values=(mac, vendor, ip))
     except queue.Empty:
         pass
+    # Re-enable Start when thread finishes
+    if scan_thread and not scan_thread.is_alive():
+        start_btn.config(state="normal")
+        stop_btn.config(state="disabled")
     root.after(100, poll_queue)
 
 def start_scan():
-    # Pass the callback explicitly as a keyword argument
-    threading.Thread(target=run_scan, kwargs={"callback": on_new_device}, daemon=True).start()
-    start_button.config(state="disabled")
+    # optional: clear table each run
+    for item in tree.get_children():
+        tree.delete(item)
+    stop_event.clear()
+    global scan_thread
+    scan_thread = threading.Thread(
+        target=run_scan,
+        kwargs={"callback": on_new_device, "stop_event": stop_event, "interval": 30},
+        daemon=True,
+    )
+    scan_thread.start()
+    start_btn.config(state="disabled")
+    stop_btn.config(state="normal")
 
-# ---- Build the window ----
+def stop_scan():
+    stop_event.set()
+    stop_btn.config(state="disabled")  # will re-enable Start when thread stops
+
+# ---- GUI ----
 root = tk.Tk()
 root.title("Network Scanner")
-root.geometry("560x360")
+root.geometry("600x380")
 
 columns = ("MAC", "Vendor", "IP")
 tree = ttk.Treeview(root, columns=columns, show="headings")
 for col in columns:
     tree.heading(col, text=col)
-    tree.column(col, width=180 if col == "Vendor" else 170, anchor="center")
-tree.pack(fill="both", expand=True)
+    tree.column(col, width=190 if col == "Vendor" else 200, anchor="center")
+tree.pack(fill="both", expand=True, padx=8, pady=(8, 4))
 
-start_button = ttk.Button(root, text="Start Scan", command=start_scan)
-start_button.pack(pady=6)
+btns = ttk.Frame(root)
+btns.pack(pady=6)
+start_btn = ttk.Button(btns, text="Start Scan", command=start_scan)
+stop_btn  = ttk.Button(btns, text="Stop Scan",  command=stop_scan)
+start_btn.grid(row=0, column=0, padx=6)
+stop_btn.grid(row=0, column=1, padx=6)
+stop_btn.config(state="disabled")
 
 poll_queue()
 root.mainloop()
