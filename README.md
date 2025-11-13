@@ -1,4 +1,6 @@
-# Team-Berecrux-Project---Project-Starbound-2025
+                        
+![Logo](</images/logo.png>)                                
+
 Team Becrux submission for CSULB Project Starbound, currently ran as a script with modules to be installed but will be containarized via Docker to run as a "one click" application on user devices 
 
 ### Getting Started
@@ -45,6 +47,6 @@ Make sure you are using the right interpreter by
 - [ ] Frontend UI, user should not have to replace anything within code or find there IPv4 address 
 - [ ] Raspberry Pi OS localization
 
-### feature 1 and 3
-- device discovery and fingerprinting work with get local ip add file and network scan file
 
+### Project Schematics
+![alt text](/images/image.png) 
