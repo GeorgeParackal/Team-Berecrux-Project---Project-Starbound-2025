@@ -5,6 +5,8 @@ from tkinter import ttk
 from network_scan import run_scan
 
 q = queue.Queue()
+stop_event = threading.Event()
+scan_thread = None
 
 def on_new_device(mac, vendor, ip):
     q.put((mac, vendor, ip))
@@ -19,8 +21,17 @@ def poll_queue():
     root.after(100, poll_queue)
 
 def start_scan():
-    threading.Thread(target=run_scan, args=(on_new_device,), daemon=True).start()
+    global scan_thread
+    stop_event.clear()
+    scan_thread = threading.Thread(target=run_scan, args=(on_new_device, stop_event), daemon=True)
+    scan_thread.start()
     start_button.config(state="disabled")
+    stop_button.config(state="normal")
+
+def stop_scan():
+    stop_event.set()
+    start_button.config(state="normal")
+    stop_button.config(state="disabled")
 
 # ---- GUI ----
 root = tk.Tk()
@@ -35,8 +46,14 @@ for col in columns:
 
 tree.pack(fill="both", expand=True)
 
-start_button = ttk.Button(root, text="Start Scan", command=start_scan)
-start_button.pack(pady=6)
+button_frame = ttk.Frame(root)
+button_frame.pack(pady=6)
+
+start_button = ttk.Button(button_frame, text="Start Scan", command=start_scan)
+start_button.pack(side="left", padx=5)
+
+stop_button = ttk.Button(button_frame, text="Stop Scan", command=stop_scan, state="disabled")
+stop_button.pack(side="left", padx=5)
 
 poll_queue()
 root.mainloop()

@@ -4,11 +4,11 @@ from ipaddress import IPv4Interface
 import socket
 import time
 
-def run_scan(callback=None):
+def run_scan(callback=None, stop_event=None):
     """Run the network scan, optionally sending results to a callback."""
     try:
         count = 0
-        while True:
+        while not (stop_event and stop_event.is_set()):
             hostname = socket.gethostname()
             host_ip_address = host_ip.get_local_ip_address()
             network = str(IPv4Interface(host_ip_address + '/24').network)
