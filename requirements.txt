@@ -1,5 +1,1 @@
-flask
-flask_login
-flask_sqlalchemy
-sqlalchemy
-werkzeug
+scapy
