@@ -1,1 +1,7 @@
 **__pycache__**
+HNS_venv/
+*.db
+*.log
+.env
+manual_devices.json
+manual_devices.json.backup
