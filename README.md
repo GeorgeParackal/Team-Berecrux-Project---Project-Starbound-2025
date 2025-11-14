@@ -3,6 +3,19 @@
 
 Team Becrux submission for CSULB Project Starbound, currently ran as a script with modules to be installed but will be containarized via Docker to run as a "one click" application on user devices 
 
+## Quick Start
+```bash
+# Create and activate virtual environment
+python -m venv HNS_venv
+HNS_venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the program
+python main.py
+```
+
 ### Getting Started
 Currently configured to run on windows, but easily translated into Linux/MacOS systems. 
 
