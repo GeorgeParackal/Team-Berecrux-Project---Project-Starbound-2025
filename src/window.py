@@ -2,8 +2,7 @@ import threading
 import queue
 import tkinter as tk
 from tkinter import ttk
-from network_scan import run_scan
-
+from network_scan import run_scanmenu 
 q = queue.Queue()
 stop_event = threading.Event()
 scan_thread = None
