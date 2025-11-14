@@ -7,6 +7,7 @@ from network_scan import run_scan
 q = queue.Queue()
 stop_event = threading.Event()
 scan_thread = None
+scanned_devices = set()  # stores MAC addresses
 
 def on_new_device(mac, vendor, ip):
     q.put((mac, vendor, ip))
@@ -15,9 +16,20 @@ def poll_queue():
     try:
         while True:
             mac, vendor, ip = q.get_nowait()
-            tree.insert("", "end", values=(mac, vendor, ip))
+            
+            # Skip if we've already seen this device
+            if mac in scanned_devices:
+                continue
+            
+            scanned_devices.add(mac)  # remember this device
+            
+            # Add visual index
+            index = len(tree.get_children()) + 1
+            tree.insert("", "end", values=(index, mac, vendor, ip))
+            
     except queue.Empty:
         pass
+    
     root.after(100, poll_queue)
 
 def start_scan():
@@ -38,11 +50,20 @@ root = tk.Tk()
 root.title("Network Scanner")
 root.geometry("560x360")
 
-columns = ("MAC", "Vendor", "IP")
+COLUMNS_CONFIG = {
+    "Index":  {"width": 40,  "anchor": "center"},
+    "MAC":    {"width": 170, "anchor": "center"},
+    "Vendor": {"width": 180, "anchor": "center"},
+    "IP":     {"width": 170, "anchor": "center"},
+}
+
+columns = list(COLUMNS_CONFIG.keys())
 tree = ttk.Treeview(root, columns=columns, show="headings")
-for col in columns:
+
+# Build columns dynamically from config
+for col, options in COLUMNS_CONFIG.items():
     tree.heading(col, text=col)
-    tree.column(col, width=180 if col == "Vendor" else 170, anchor="center")
+    tree.column(col, width=options["width"], anchor=options["anchor"])
 
 tree.pack(fill="both", expand=True)
 
