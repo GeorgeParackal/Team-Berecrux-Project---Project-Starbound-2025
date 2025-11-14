@@ -38,6 +38,11 @@
   .brand h1{margin:0;font-size:16px;font-weight:800}
   .muted{color:var(--muted);font-size:12px}
 
+  /* ====== Settings Tab Enhancements ====== */
+  .btn-ghost{padding:4px 8px;border-radius:4px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:11px;cursor:pointer;transition:all 0.2s ease}
+  .btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .row{display:flex;justify-content:space-between;align-items:center}
+
   /* ====== Tabs (4 only) ====== */
   input[type=radio]{display:none}
   .tabs{margin-top:10px;border:1px solid var(--line);border-radius:12px;padding:6px;background:rgba(6,14,20,.5)}
@@ -50,14 +55,14 @@
   .pane{display:none}
 
   /* active label */
-  #tab-home:checked ~ .tabs .tab-label[for="tab-home"],
   #tab-devices:checked ~ .tabs .tab-label[for="tab-devices"],
+  #tab-network:checked ~ .tabs .tab-label[for="tab-network"],
   #tab-killswitch:checked ~ .tabs .tab-label[for="tab-killswitch"],
   #tab-settings:checked ~ .tabs .tab-label[for="tab-settings"]{
     color:#eaffff;background:linear-gradient(180deg,rgba(0,229,255,.2),rgba(0,229,255,.06));
     border-color:rgba(0,229,255,.45);box-shadow:0 0 18px rgba(0,229,255,.25), inset 0 0 0 1px rgba(0,229,255,.25)}
-  #tab-home:checked ~ .panes #pane-home,
   #tab-devices:checked ~ .panes #pane-devices,
+  #tab-network:checked ~ .panes #pane-network,
   #tab-killswitch:checked ~ .panes #pane-killswitch,
   #tab-settings:checked ~ .panes #pane-settings{display:block}
 
@@ -98,6 +103,32 @@
   .grid{display:grid;gap:14px}
   .grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
   @media (max-width:800px){.grid-2{grid-template-columns:1fr}}
+
+  /* ====== Device Status & UI Enhancements ====== */
+  .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .status-online{background:#08f76f}
+  .status-offline{background:#ff6b6b}
+  .status-unknown{background:#9fc9db}
+  
+  .device-icon{font-size:16px;margin-right:6px}
+  .last-seen{font-size:11px;color:var(--muted);font-style:italic}
+  .time-badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(0,229,255,0.1);color:var(--accent)}
+  .time-recent{background:rgba(8,247,111,0.1);color:#08f76f}
+  .time-old{background:rgba(159,201,219,0.1);color:var(--muted)}
+  
+  .toast{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin-bottom:8px;box-shadow:0 4px 12px rgba(0,0,0,0.3);animation:slideIn 0.3s ease}
+  .toast.success{border-left:4px solid #08f76f}
+  .toast.error{border-left:4px solid #ff6b6b}
+  .toast.info{border-left:4px solid var(--accent)}
+  @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+  
+  .network-device{display:flex;flex-direction:column;align-items:center;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);min-width:80px;cursor:pointer;transition:all 0.2s ease}
+  .network-device:hover{border-color:var(--accent);transform:translateY(-2px)}
+  .network-device.online{border-color:#08f76f}
+  .network-device.offline{border-color:#ff6b6b;opacity:0.6}
+  
+  .refreshing{animation:spin 1s linear infinite}
+  @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 
   /* ====== Fullscreen code-rain overlay ====== */
   #matrixOverlay{

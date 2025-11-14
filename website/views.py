@@ -2,7 +2,23 @@ import json
 
 from flask import Blueprint, render_template, request, flash, jsonify
 
-from .scan_device import _get_local_ip, build_network_device_list, Network_Device
+try:
+    from .scan_device import _get_local_ip, build_network_device_list, Network_Device
+except ImportError:
+    # Fallback for missing dependencies
+    def _get_local_ip():
+        return "127.0.0.1"
+    
+    def build_network_device_list():
+        return {}
+    
+    class Network_Device:
+        def __init__(self, ip=None, mac=None, vendor=None, last_seen=None, first_seen=None):
+            self.ip = ip
+            self.mac = mac
+            self.vendor = vendor
+            self.last_seen = last_seen
+            self.first_seen = first_seen
 
 views = Blueprint('views', __name__)
 
