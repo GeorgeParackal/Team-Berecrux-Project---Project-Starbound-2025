@@ -43,14 +43,19 @@ def poll_queue():
     root.after(100, poll_queue)
 
 def start_scan():
-    # optional: clear table each run
+    global scan_thread, stop_event, known_devices
+    
+    # Clear previous data
     for item in tree.get_children():
         tree.delete(item)
-    stop_event.clear()
-    global scan_thread
+    known_devices.clear()
+    
+    # Create new stop event for this scan
+    stop_event = threading.Event()
+    
     scan_thread = threading.Thread(
         target=run_scan,
-        kwargs={"callback": on_new_device, "stop_event": stop_event, "interval": 30},
+        args=(on_new_device, stop_event),
         daemon=True,
     )
     scan_thread.start()
@@ -58,8 +63,10 @@ def start_scan():
     stop_btn.config(state="normal")
 
 def stop_scan():
-    stop_event.set()
-    stop_btn.config(state="disabled")  # will re-enable Start when thread stops
+    if stop_event:
+        stop_event.set()
+    start_btn.config(state="normal")
+    stop_btn.config(state="disabled")
 
 # ---- GUI ----
 root = tk.Tk()
