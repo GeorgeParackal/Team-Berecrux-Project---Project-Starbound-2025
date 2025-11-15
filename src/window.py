@@ -33,25 +33,26 @@ def poll_queue():
     try:
         while True:
             mac, vendor, ip = q.get_nowait()
+            
+            # Determine device type icon
+            if "router" in vendor.lower() or "gateway" in vendor.lower():
+                device_type = "🌐 Router"
+            elif "apple" in vendor.lower():
+                device_type = "🍎 Apple"
+            elif "samsung" in vendor.lower():
+                device_type = "📱 Samsung"
+            else:
+                device_type = "💻 Device"
 
             if mac in known_devices:
                 item_id = known_devices[mac]
                 current_values = tree.item(item_id, "values")
-                if current_values != (mac, vendor, ip, "Active"):
-                    tree.item(item_id, values=(mac, vendor, ip, "Active"))
+                if current_values != (device_type, mac, vendor, ip, "Active"):
+                    tree.item(item_id, values=(device_type, mac, vendor, ip, "Active"))
             else:
-                # Add new device - values must match column order: MAC, Vendor, IP, Status
-                item_id = tree.insert("", "end", values=(mac, vendor, ip, "Active"))
+                # Add new device - values: Type, MAC, Vendor, IP, Status
+                item_id = tree.insert("", "end", values=(device_type, mac, vendor, ip, "Active"))
                 known_devices[mac] = item_id
-                # Color coding for device types in the icon column
-                if "router" in vendor.lower() or "gateway" in vendor.lower():
-                    tree.set(item_id, "#0", "🌐")
-                elif "apple" in vendor.lower():
-                    tree.set(item_id, "#0", "🍎")
-                elif "samsung" in vendor.lower():
-                    tree.set(item_id, "#0", "📱")
-                else:
-                    tree.set(item_id, "#0", "💻")
 
     except queue.Empty:
         pass
@@ -119,12 +120,12 @@ main_frame.pack(fill='both', expand=True, padx=10, pady=5)
 tree_frame = ttk.Frame(main_frame)
 tree_frame.pack(fill='both', expand=True, pady=(0, 10))
 
-columns = ("MAC Address", "Vendor", "IP Address", "Status")
-tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings", height=15)
+columns = ("Type", "MAC Address", "Vendor", "IP Address", "Status")
+tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=15)
 
-# Configure columns to match data order: MAC, Vendor, IP, Status
-tree.heading('#0', text='Type', anchor='center')
-tree.column('#0', width=50, minwidth=50)
+# Configure columns to match data order: Type, MAC, Vendor, IP, Status
+tree.heading('Type', text='Device Type', anchor='center')
+tree.column('Type', width=120, anchor='center')
 tree.heading('MAC Address', text='MAC Address', anchor='center')
 tree.column('MAC Address', width=150, anchor='center')
 tree.heading('Vendor', text='Vendor/Manufacturer', anchor='center')
