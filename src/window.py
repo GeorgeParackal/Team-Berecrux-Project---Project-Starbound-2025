@@ -1,11 +1,14 @@
-import threading
-import queue
-import tkinter as tk
+import threading, queue, tkinter as tk
 from tkinter import ttk
-from network_scan import run_scan
+import importlib, inspect, network_scan
+
+# Force-reload so we use the latest scanner code
+importlib.reload(network_scan)
+print("Using:", network_scan.__file__)
+print("run_scan signature:", inspect.signature(network_scan.run_scan))
+run_scan = network_scan.run_scan
 
 q = queue.Queue()
-stop_event = threading.Event()
 scan_thread = None
 scanned_devices = set()  # stores MAC addresses
 
@@ -27,6 +30,10 @@ def poll_queue():
             tree.insert("", "end", values=(index, mac, vendor, ip))
     except queue.Empty:
         pass
+    # Re-enable Start when thread finishes
+    if scan_thread and not scan_thread.is_alive():
+        start_btn.config(state="normal")
+        stop_btn.config(state="disabled")
     root.after(100, poll_queue)
 
 def start_scan():
@@ -38,8 +45,8 @@ def start_scan():
         daemon=True
     )
     scan_thread.start()
-    start_button.config(state="disabled")
-    stop_button.config(state="normal")
+    start_btn.config(state="disabled")
+    stop_btn.config(state="normal")
 
 def stop_scan():
     stop_event.set()
@@ -78,8 +85,13 @@ button_frame.pack(pady=6)
 start_button = ttk.Button(button_frame, text="Start Scan", command=start_scan)
 start_button.pack(side="left", padx=5)
 
-stop_button = ttk.Button(button_frame, text="Stop Scan", command=stop_scan, state="disabled")
-stop_button.pack(side="left", padx=5)
+btns = ttk.Frame(root)
+btns.pack(pady=6)
+start_btn = ttk.Button(btns, text="Start Scan", command=start_scan)
+stop_btn  = ttk.Button(btns, text="Stop Scan",  command=stop_scan)
+start_btn.grid(row=0, column=0, padx=6)
+stop_btn.grid(row=0, column=1, padx=6)
+stop_btn.config(state="disabled")
 
 poll_queue()
 root.mainloop()

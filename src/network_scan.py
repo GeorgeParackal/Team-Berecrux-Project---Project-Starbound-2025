@@ -20,10 +20,23 @@ def run_scan(callback=None, stop_event=None, cycle_callback=None, interval_sec=3
             # timeout caps how long to wait for replies; retry keeps it quick
             ans, _ = scapy.arping(network, timeout=3, retry=0, verbose=False)
 
+            try:
+                ans, _ = scapy.arping(network, timeout=2, retry=1, verbose=False)
+            except Exception as e:
+                if callback:
+                    callback("error", "scan_failed", str(e))
+                time.sleep(5)
+                continue
+
+            seen = set()
             for _, rcv in ans:
-                mac = rcv.hwsrc
-                ip = rcv.psrc
-                vendor = "unknown"
+                if stop_event is not None and stop_event.is_set():
+                    break
+                mac, ip = rcv.hwsrc, rcv.psrc
+                if (mac, ip) in seen:
+                    continue
+                seen.add((mac, ip))
+                vendor = _vendor(mac)
                 if callback:
                     callback(mac, vendor, ip)
                 else:
