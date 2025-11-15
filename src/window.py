@@ -10,30 +10,24 @@ run_scan = network_scan.run_scan
 
 q = queue.Queue()
 scan_thread = None
-stop_event = threading.Event()
-
-# Track devices by MAC address
-known_devices = {}
+scanned_devices = set()  # stores MAC addresses
 
 def on_new_device(mac, vendor, ip):
     q.put((mac, vendor, ip))
+
+def on_cycle_update(n: int):
+    # safely update UI from thread
+    root.after(0, lambda: cycle_label.config(text=f"Scan cycles: {n}"))
 
 def poll_queue():
     try:
         while True:
             mac, vendor, ip = q.get_nowait()
-
-            if mac in known_devices:
-                # Update existing item if IP or vendor changed
-                item_id = known_devices[mac]
-                current_values = tree.item(item_id, "values")
-                if current_values != (mac, vendor, ip):
-                    tree.item(item_id, values=(mac, vendor, ip))
-            else:
-                # Add new device
-                item_id = tree.insert("", "end", values=(mac, vendor, ip))
-                known_devices[mac] = item_id
-
+            if mac in scanned_devices:
+                continue
+            scanned_devices.add(mac)
+            index = len(tree.get_children()) + 1
+            tree.insert("", "end", values=(index, mac, vendor, ip))
     except queue.Empty:
         pass
     # Re-enable Start when thread finishes
@@ -43,42 +37,53 @@ def poll_queue():
     root.after(100, poll_queue)
 
 def start_scan():
-    global scan_thread, stop_event, known_devices
-    
-    # Clear previous data
-    for item in tree.get_children():
-        tree.delete(item)
-    known_devices.clear()
-    
-    # Create new stop event for this scan
-    stop_event = threading.Event()
-    
+    global scan_thread
+    stop_event.clear()
     scan_thread = threading.Thread(
         target=run_scan,
-        args=(on_new_device, stop_event),
-        daemon=True,
+        args=(on_new_device, stop_event, on_cycle_update, 30),
+        daemon=True
     )
     scan_thread.start()
     start_btn.config(state="disabled")
     stop_btn.config(state="normal")
 
 def stop_scan():
-    if stop_event:
-        stop_event.set()
-    start_btn.config(state="normal")
-    stop_btn.config(state="disabled")
+    stop_event.set()
+    start_button.config(state="normal")
+    stop_button.config(state="disabled")
+    cycle_label.config(text="Scan cycles: 0")
 
 # ---- GUI ----
 root = tk.Tk()
 root.title("Network Scanner")
-root.geometry("600x380")
+root.geometry("560x390")
 
-columns = ("MAC", "Vendor", "IP")
+COLUMNS_CONFIG = {
+    "Index":  {"width": 40,  "anchor": "center"},
+    "MAC":    {"width": 170, "anchor": "center"},
+    "Vendor": {"width": 180, "anchor": "center"},
+    "IP":     {"width": 170, "anchor": "center"},
+}
+
+columns = list(COLUMNS_CONFIG.keys())
 tree = ttk.Treeview(root, columns=columns, show="headings")
-for col in columns:
+
+for col, options in COLUMNS_CONFIG.items():
     tree.heading(col, text=col)
-    tree.column(col, width=190 if col == "Vendor" else 200, anchor="center")
-tree.pack(fill="both", expand=True, padx=8, pady=(8, 4))
+    tree.column(col, width=options["width"], anchor=options["anchor"])
+
+tree.pack(fill="both", expand=True)
+
+# Add scan cycle label
+cycle_label = ttk.Label(root, text="Scan cycles: 0")
+cycle_label.pack(pady=(4, 0))
+
+button_frame = ttk.Frame(root)
+button_frame.pack(pady=6)
+
+start_button = ttk.Button(button_frame, text="Start Scan", command=start_scan)
+start_button.pack(side="left", padx=5)
 
 btns = ttk.Frame(root)
 btns.pack(pady=6)
