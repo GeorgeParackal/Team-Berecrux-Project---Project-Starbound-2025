@@ -7,11 +7,14 @@ import inspect
 import time
 import csv
 import os
+import sys
+import json
+import math
 
 # =========================
 # CONFIG
 # =========================
-APP_TITLE = "🔍 Network Device Scanner — Pro v3.0"
+APP_TITLE = "🔍 Network Device Scanner"
 BG_DARK = "#111827"  # slate-900
 CARD = "#1f2937"     # slate-800
 ACCENT = "#2563eb"   # blue-600
@@ -26,6 +29,16 @@ ROW_ALT = "#111827"
 DEVICE_TTL = 60  # seconds of inactivity before a device is marked inactive
 QUEUE_POLL_MS = 100
 STATUS_REFRESH_MS = 1000
+
+# Visualization colors for device types
+TYPE_COLORS = {
+    "🌐 Router": "#22d3ee",   # cyan-400
+    "🍎 Apple": "#f472b6",    # pink-400
+    "📱 Samsung": "#34d399",  # green-400
+    "🧪 Raspberry Pi": "#f59e0b",  # amber-500
+    "💻 Device": "#a78bfa",   # violet-400
+    "🔧 Device": "#60a5fa",   # blue-400
+}
 
 # =========================
 # Best-effort import and live-reload of user scanner
@@ -162,6 +175,20 @@ def device_type_from_vendor(vendor: str) -> str:
 # Sorting helpers
 sort_state = {}
 
+sorted_col = None
+
+
+def _update_sorted_heading(tree, col, reverse):
+    global sorted_col
+    # Reset all headings
+    for c in tree["columns"]:
+        label = c
+        if c == col:
+            label = f"{c} {'▼' if reverse else '▲'}"
+        tree.heading(c, text=label, command=lambda cc=c: sort_by_column(tree, cc))
+    sorted_col = col
+
+
 def sort_by_column(tree, col):
     data = [(tree.set(k, col), k) for k in tree.get_children("")]
 
@@ -183,6 +210,7 @@ def sort_by_column(tree, col):
     for index, (_, k) in enumerate(data):
         tree.move(k, "", index)
     sort_state[col] = not reverse
+    _update_sorted_heading(tree, col, reverse)
 
 
 # Filter helpers
@@ -213,13 +241,6 @@ header.pack(fill="x", padx=16, pady=(16, 8))
 lbl_title = ttk.Label(header, text=APP_TITLE, style="Title.TLabel")
 lbl_title.pack(anchor="w")
 
-lbl_sub = ttk.Label(
-    header,
-    text="Modern, responsive, recruiter-stopping network inventory UI. (Demo-safe: includes a mock scanner if your module is missing)",
-    style="Sub.TLabel",
-)
-lbl_sub.pack(anchor="w", pady=(6, 0))
-
 # --- Controls Card ---
 controls_card = ttk.Frame(root, style="Card.TFrame", padding=14)
 controls_card.pack(fill="x", padx=16, pady=8)
@@ -230,10 +251,19 @@ btn_frame.pack(side="left")
 start_btn = ttk.Button(btn_frame, text="🚀  Start Scan", style="Accent.TButton")
 stop_btn = ttk.Button(btn_frame, text="⏹️  Stop Scan", style="Danger.TButton", state="disabled")
 export_btn = ttk.Button(btn_frame, text="💾  Export CSV")
+export_json_btn = ttk.Button(btn_frame, text="🧾  Export JSON")
+settings_btn = ttk.Button(btn_frame, text="⚙  Settings")
 
 start_btn.grid(row=0, column=0, padx=(0, 8))
 stop_btn.grid(row=0, column=1, padx=8)
 export_btn.grid(row=0, column=2, padx=8)
+export_json_btn.grid(row=0, column=3, padx=8)
+settings_btn.grid(row=0, column=4, padx=8)
+progress = ttk.Progressbar(btn_frame, mode="determinate", length=160)
+progress.grid(row=0, column=5, padx=(12,4))
+scan_time_var = tk.StringVar(value="00:00")
+scan_time_lbl = ttk.Label(btn_frame, textvariable=scan_time_var, style="Sub.TLabel")
+scan_time_lbl.grid(row=0, column=6, padx=(4,0))
 
 # Filter/search
 filter_frame = ttk.Frame(controls_card, style="Card.TFrame")
@@ -245,18 +275,25 @@ filter_entry.grid(row=0, column=0, padx=(0, 8))
 clear_filter_btn = ttk.Button(filter_frame, text="✖", width=3)
 clear_filter_btn.grid(row=0, column=1)
 
-# --- Tree Card ---
+# --- Tree + Insights Card (split) ---
 list_card = ttk.Frame(root, style="Card.TFrame", padding=12)
 list_card.pack(fill="both", expand=True, padx=16, pady=(8, 16))
 
+main_split = ttk.Frame(list_card, style="Card.TFrame")
+main_split.pack(fill="both", expand=True)
+
+# Left: table
+table_frame = ttk.Frame(main_split, style="Card.TFrame")
+table_frame.pack(side="left", fill="both", expand=True)
+
 columns = ("Type", "MAC Address", "Vendor", "IP Address", "Status")
-tree = ttk.Treeview(list_card, columns=columns, show="headings")
+tree = ttk.Treeview(table_frame, columns=columns, show="headings")
 
 # Configure columns
 col_specs = {
     "Type": dict(width=140, anchor="center"),
     "MAC Address": dict(width=170, anchor="center"),
-    "Vendor": dict(width=260, anchor="w"),
+    "Vendor": dict(width=260, anchor="center"),  # centered vendor values
     "IP Address": dict(width=150, anchor="center"),
     "Status": dict(width=100, anchor="center"),
 }
@@ -266,7 +303,7 @@ for col in columns:
     tree.column(col, **col_specs[col])
 
 # Scrollbar
-scrollbar = ttk.Scrollbar(list_card, orient="vertical", command=tree.yview)
+scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
 tree.configure(yscrollcommand=scrollbar.set)
 
 # Layout
@@ -276,22 +313,80 @@ scrollbar.pack(side="right", fill="y")
 # Row tags for styling
 tree.tag_configure("inactive", foreground=TEXT_MUTED)
 tree.tag_configure("alt", background=ROW_ALT)
+# Highlight for filter matches
+try:
+    tree.tag_configure("match", background=ACCENT, foreground="white")
+except Exception:
+    pass
+
+# Right: insights & details
+side_panel = ttk.Frame(main_split, style="Card.TFrame")
+side_panel.pack(side="left", fill="y", padx=(12, 0))
+
+insights_title = ttk.Label(side_panel, text="Network Insights", style="Info.TLabel")
+insights_title.pack(anchor="w")
+
+chart_canvas = tk.Canvas(side_panel, width=220, height=220, bg=CARD, highlightthickness=0)
+chart_canvas.pack(pady=(8, 12))
+
+stats_frame = ttk.Frame(side_panel, style="Card.TFrame")
+stats_frame.pack(fill="x")
+
+stat_total = tk.StringVar(value="Total: 0")
+stat_active = tk.StringVar(value="Active: 0")
+stat_inactive = tk.StringVar(value="Inactive: 0")
+stat_vendors = tk.StringVar(value="Vendors: 0")
+
+ttk.Label(stats_frame, textvariable=stat_total, style="Info.TLabel").pack(anchor="w")
+ttk.Label(stats_frame, textvariable=stat_active, style="Info.TLabel").pack(anchor="w")
+ttk.Label(stats_frame, textvariable=stat_inactive, style="Info.TLabel").pack(anchor="w")
+ttk.Label(stats_frame, textvariable=stat_vendors, style="Info.TLabel").pack(anchor="w")
+
+ttk.Separator(side_panel, orient="horizontal").pack(fill="x", pady=12)
+
+details_title = ttk.Label(side_panel, text="Selection Details", style="Info.TLabel")
+details_title.pack(anchor="w")
+
+sel_mac = tk.StringVar(value="—")
+sel_ip = tk.StringVar(value="—")
+sel_vendor = tk.StringVar(value="—")
+sel_type = tk.StringVar(value="—")
+sel_status = tk.StringVar(value="—")
+sel_seen = tk.StringVar(value="—")
+
+def _kv(parent, key, var):
+    row = ttk.Frame(parent, style="Card.TFrame")
+    row.pack(fill="x", pady=1)
+    ttk.Label(row, text=f"{key}:", style="Info.TLabel").pack(side="left")
+    ttk.Label(row, textvariable=var, style="Info.TLabel").pack(side="right")
+
+details_frame = ttk.Frame(side_panel, style="Card.TFrame")
+details_frame.pack(fill="x", pady=(6, 8))
+
+_kv(details_frame, "Type", sel_type)
+_kv(details_frame, "MAC", sel_mac)
+_kv(details_frame, "Vendor", sel_vendor)
+_kv(details_frame, "IP", sel_ip)
+_kv(details_frame, "Status", sel_status)
+_kv(details_frame, "Last Seen", sel_seen)
+
+actions_frame = ttk.Frame(side_panel, style="Card.TFrame")
+actions_frame.pack(fill="x")
+btn_ping = ttk.Button(actions_frame, text="📡 Ping", style="Accent.TButton")
+btn_copy_mac = ttk.Button(actions_frame, text="Copy MAC")
+btn_copy_ip = ttk.Button(actions_frame, text="Copy IP")
+btn_ping.grid(row=0, column=0, padx=(0, 6), pady=2)
+btn_copy_mac.grid(row=0, column=1, padx=6, pady=2)
+btn_copy_ip.grid(row=0, column=2, padx=6, pady=2)
 
 # --- Status Bar ---
 status = ttk.Frame(root, style="TFrame")
 status.pack(fill="x", padx=16, pady=(0, 12))
 
-status_var = tk.StringVar(value="Ready to scan network")
-count_var = tk.StringVar(value="Devices: 0")
+status_var = tk.StringVar(value="")
+count_var = tk.StringVar(value="")  # Hidden per request (removed bottom-right device count)
 
-status_lbl = ttk.Label(status, textvariable=status_var, style="Sub.TLabel")
-count_lbl = ttk.Label(status, textvariable=count_var, style="Sub.TLabel")
-status_lbl.pack(side="left")
-count_lbl.pack(side="right")
-
-# Progress bar
-progress = ttk.Progressbar(status, mode="determinate", length=260)
-progress.pack(side="left", padx=(12, 0))
+# Removed status label and count label per request
 
 # Context menu
 menu = tk.Menu(root, tearoff=0)
@@ -312,6 +407,65 @@ def popup_menu(event):
 # Behaviors
 # =========================
 
+def compute_stats():
+    now = time.time()
+    total = len(known_devices)
+    active = sum(1 for mac in known_devices if now - last_seen.get(mac, 0) <= DEVICE_TTL)
+    inactive = total - active
+    vendors = set()
+    dist = {}
+    for mac, iid in known_devices.items():
+        vals = tree.item(iid, "values")
+        vendors.add(vals[2])
+        t = vals[0]
+        dist[t] = dist.get(t, 0) + 1
+    return total, active, inactive, len(vendors), dist
+
+
+def draw_donut(canvas, distribution):
+    canvas.delete("all")
+    total = sum(distribution.values())
+    if total == 0:
+        # Empty placeholder donut
+        canvas.create_oval(10, 10, 210, 210, outline=TEXT_MUTED, width=2)
+        canvas.create_text(110, 110, text="No data", fill=TEXT_MUTED, font=("Segoe UI", 10, "bold"))
+        return
+    start = -90  # start at top
+    bbox = (10, 10, 210, 210)
+    for label, count in distribution.items():
+        extent = 360 * (count / total)
+        color = TYPE_COLORS.get(label, "#64748b")
+        canvas.create_arc(bbox, start=start, extent=extent, style=tk.PIESLICE, outline=CARD, width=1, fill=color)
+        start += extent
+    # inner cut-out for donut effect
+    canvas.create_oval(55, 55, 165, 165, fill=CARD, outline=CARD)
+
+
+def update_insights():
+    total, active, inactive, vendors_count, dist = compute_stats()
+    stat_total.set(f"Total: {total}")
+    stat_active.set(f"Active: {active}")
+    stat_inactive.set(f"Inactive: {inactive}")
+    stat_vendors.set(f"Vendors: {vendors_count}")
+    draw_donut(chart_canvas, dist)
+
+
+def on_select(event=None):
+    sel = tree.selection()
+    if not sel:
+        sel_mac.set("—"); sel_ip.set("—"); sel_vendor.set("—"); sel_type.set("—"); sel_status.set("—"); sel_seen.set("—")
+        return
+    iid = sel[0]
+    vals = tree.item(iid, "values")
+    mac = vals[1]; vendor = vals[2]; ip = vals[3]; status_txt = vals[4]; typ = vals[0]
+    seen_epoch = last_seen.get(mac, 0)
+    sel_mac.set(mac)
+    sel_vendor.set(vendor)
+    sel_ip.set(ip)
+    sel_status.set(status_txt)
+    sel_type.set(typ)
+    sel_seen.set(time.strftime('%H:%M:%S', time.localtime(seen_epoch)) if seen_epoch else "—")
+
 def copy_col(idx):
     sel = tree.selection()
     if not sel:
@@ -320,7 +474,6 @@ def copy_col(idx):
     try:
         root.clipboard_clear()
         root.clipboard_append(values[idx])
-        status_var.set(f"Copied: {values[idx]}")
     except Exception:
         pass
 
@@ -386,6 +539,7 @@ def poll_queue():
 
     # Re-apply filter on the fly
     apply_filter()
+    update_insights()
 
     root.after(QUEUE_POLL_MS, poll_queue)
 
@@ -415,31 +569,57 @@ def refresh_statuses():
         progress.configure(mode="indeterminate")
         progress.start(12)
         elapsed = int(time.time() - scan_start_time) if scan_start_time else 0
-        status_var.set(f"Scanning… {elapsed}s")
+        # Update mm:ss elapsed timer next to progress bar
+        minutes = elapsed // 60
+        seconds = elapsed % 60
+        scan_time_var.set(f"{minutes:02d}:{seconds:02d}")
     else:
         progress.stop()
         progress.configure(mode="determinate", value=0)
-        status_var.set("Scan stopped" if scan_start_time else "Ready to scan network")
 
+    update_insights()
     root.after(STATUS_REFRESH_MS, refresh_statuses)
 
 
 
 def apply_filter(*_):
-    # Show/hide rows according to filter query
+    # Hide non-matching devices; restore them when filter is cleared
     needle = (filter_var.get() or "").strip().lower()
-    for iid in tree.get_children(""):
-        vals = tree.item(iid, "values")
-        show = True
-        if needle:
-            show = any(needle in str(v).lower() for v in vals)
-        try:
-            if show:
+    all_items = list(known_devices.values())
+    
+    if not needle:
+        # Restore all devices and fix alt row striping
+        for idx, iid in enumerate(all_items):
+            try:
                 tree.reattach(iid, "", "end")
-            else:
+            except tk.TclError:
+                pass
+            tags = [t for t in tree.item(iid, "tags") if t not in ("match", "alt")]
+            if idx % 2 == 1:
+                tags.append("alt")
+            tree.item(iid, tags=tuple(tags))
+        return
+
+    # Show only matches; hide non-matches
+    visible_idx = 0
+    for iid in all_items:
+        vals = tree.item(iid, "values")
+        joined = " ".join(str(v).lower() for v in vals)
+        if needle in joined:
+            try:
+                tree.reattach(iid, "", "end")
+            except tk.TclError:
+                pass
+            tags = [t for t in tree.item(iid, "tags") if t not in ("match", "alt")]
+            if visible_idx % 2 == 1:
+                tags.append("alt")
+            tree.item(iid, tags=tuple(tags))
+            visible_idx += 1
+        else:
+            try:
                 tree.detach(iid)
-        except tk.TclError:
-            pass
+            except tk.TclError:
+                pass
 
 
 
@@ -460,7 +640,51 @@ def export_csv():
         for mac, iid in known_devices.items():
             vals = tree.item(iid, "values")
             w.writerow([*vals, int(last_seen.get(mac, 0))])
-    status_var.set(f"Exported to {os.path.basename(path)}")
+
+
+def export_json():
+    data = []
+    for mac, iid in known_devices.items():
+        vals = tree.item(iid, "values")
+        data.append({
+            "type": vals[0],
+            "mac": vals[1],
+            "vendor": vals[2],
+            "ip": vals[3],
+            "status": vals[4],
+            "last_seen": int(last_seen.get(mac, 0)),
+        })
+    path = filedialog.asksaveasfilename(
+        defaultextension=".json",
+        filetypes=[("JSON", "*.json")],
+        initialfile="network_devices.json",
+    )
+    if not path:
+        return
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"devices": data, "generated_at": int(time.time())}, f, indent=2)
+
+
+def open_settings():
+    dlg = tk.Toplevel(root)
+    dlg.title("Settings")
+    dlg.configure(bg=CARD)
+    dlg.resizable(False, False)
+    ttk.Label(dlg, text="Device Inactivity TTL (seconds)", style="Info.TLabel").pack(padx=12, pady=(12, 4))
+    ttl_var = tk.IntVar(value=DEVICE_TTL)
+    ttl_scale = ttk.Scale(dlg, from_=10, to=300, orient="horizontal")
+    ttl_scale.set(DEVICE_TTL)
+    ttl_scale.pack(fill="x", padx=12)
+
+    def save_and_close():
+        global DEVICE_TTL
+        DEVICE_TTL = int(ttl_scale.get())
+        dlg.destroy()
+
+    btns = ttk.Frame(dlg, style="Card.TFrame")
+    btns.pack(fill="x", padx=12, pady=12)
+    ttk.Button(btns, text="Save", style="Accent.TButton", command=save_and_close).pack(side="right")
+    ttk.Button(btns, text="Cancel", command=dlg.destroy).pack(side="right", padx=(0, 8))
 
 
 # =========================
@@ -481,6 +705,7 @@ def start_scan():
 
     stop_event = threading.Event()
     scan_start_time = time.time()
+    scan_time_var.set("00:00")  # reset timer display on new scan
 
     def runner():
         try:
@@ -511,10 +736,22 @@ def stop_scan():
 start_btn.configure(command=start_scan)
 stop_btn.configure(command=stop_scan)
 export_btn.configure(command=export_csv)
+export_json_btn.configure(command=export_json)
+settings_btn.configure(command=open_settings)
 clear_filter_btn.configure(command=lambda: (filter_var.set(""), apply_filter()))
 filter_var.trace_add("write", lambda *_: apply_filter())
 
 tree.bind("<Button-3>", popup_menu)  # right-click
+tree.bind("<<TreeviewSelect>>", on_select)
+btn_ping.configure(command=ping_selected)
+btn_copy_mac.configure(command=lambda: copy_col(1))
+btn_copy_ip.configure(command=lambda: copy_col(3))
+
+# Keyboard shortcuts
+root.bind("<Control-f>", lambda e: (filter_entry.focus_set(), filter_entry.select_range(0, tk.END)))
+root.bind("<Control-s>", lambda e: export_csv())
+root.bind("<F5>", lambda e: start_scan())
+root.bind("<Shift-F5>", lambda e: stop_scan())
 
 # Start background loops
 root.after(QUEUE_POLL_MS, poll_queue)
