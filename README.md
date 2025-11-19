@@ -22,7 +22,13 @@ Version 2.0.0 - Custom network managment
 - [ ] Raspberry Pi OS localization
 - [ ] Built in DNS-based filtering
 
-### Getting Started
-To get started with version **1.0.x**, download the latest release here
+### Download
+1) To get started with version **1.0.x**, download the latest release here through this button:
 
 [![Releases](https://img.shields.io/badge/Go%20to%20Releases-blue?style=for-the-badge)](https://github.com/GeorgeParackal/Team-Berecrux-Project---Project-Starbound-2025/releases)
+
+2) Navigate to the latest release and select the dropdown arrow besides "Assets".
+
+3) Click on "NetworkScanner.exe" to download.
+
+4) In your device's file manager, navigate to "NetworkScanner.exe" and double click to run.
