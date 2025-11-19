@@ -7,19 +7,20 @@ import inspect
 import time
 import csv
 import os
+import manuf
 
 # =========================
 # CONFIG
 # =========================
-APP_TITLE = "🔍 Network Device Scanner — Pro v3.0"
+APP_TITLE = "Network Device Scanner"
 BG_DARK = "#111827"  # slate-900
 CARD = "#1f2937"     # slate-800
-ACCENT = "#2563eb"   # blue-600
-ACCENT_HOVER = "#1d4ed8"  # blue-700
+ACCENT = "#1f2937"   # blue-600
+ACCENT_HOVER = "#9ca3af"  # blue-700
 TEXT = "#e5e7eb"     # gray-200
 TEXT_MUTED = "#9ca3af"  # gray-400
 SUCCESS = "#22c55e"  # green-500
-DANGER = "#ef4444"   # red-500
+DANGER = "#1f2937"   # red-500
 WARNING = "#f59e0b"  # amber-500
 ROW_ALT = "#111827"
 
@@ -185,17 +186,6 @@ def sort_by_column(tree, col):
     sort_state[col] = not reverse
 
 
-# Filter helpers
-filter_var = None
-
-
-def matches_filter(values):
-    needle = (filter_var.get() or "").strip().lower()
-    if not needle:
-        return True
-    return any(needle in str(v).lower() for v in values)
-
-
 # =========================
 # Tk App
 # =========================
@@ -215,7 +205,7 @@ lbl_title.pack(anchor="w")
 
 lbl_sub = ttk.Label(
     header,
-    text="Modern, responsive, recruiter-stopping network inventory UI. (Demo-safe: includes a mock scanner if your module is missing)",
+    text="Version 1.0 Offline Scanner - Designed for proof of concept",
     style="Sub.TLabel",
 )
 lbl_sub.pack(anchor="w", pady=(6, 0))
@@ -227,23 +217,14 @@ controls_card.pack(fill="x", padx=16, pady=8)
 btn_frame = ttk.Frame(controls_card, style="Card.TFrame")
 btn_frame.pack(side="left")
 
-start_btn = ttk.Button(btn_frame, text="🚀  Start Scan", style="Accent.TButton")
-stop_btn = ttk.Button(btn_frame, text="⏹️  Stop Scan", style="Danger.TButton", state="disabled")
-export_btn = ttk.Button(btn_frame, text="💾  Export CSV")
+start_btn = ttk.Button(btn_frame, text="Start Scan", style="Accent.TButton")
+stop_btn = ttk.Button(btn_frame, text="Stop Scan", style="Accent.TButton", state="disabled")
+export_btn = ttk.Button(btn_frame, text="Export CSV", style="Accent.TButton")
 
 start_btn.grid(row=0, column=0, padx=(0, 8))
 stop_btn.grid(row=0, column=1, padx=8)
 export_btn.grid(row=0, column=2, padx=8)
 
-# Filter/search
-filter_frame = ttk.Frame(controls_card, style="Card.TFrame")
-filter_frame.pack(side="right")
-
-filter_var = tk.StringVar()
-filter_entry = ttk.Entry(filter_frame, textvariable=filter_var, width=32)
-filter_entry.grid(row=0, column=0, padx=(0, 8))
-clear_filter_btn = ttk.Button(filter_frame, text="✖", width=3)
-clear_filter_btn.grid(row=0, column=1)
 
 # --- Tree Card ---
 list_card = ttk.Frame(root, style="Card.TFrame", padding=12)
@@ -256,7 +237,7 @@ tree = ttk.Treeview(list_card, columns=columns, show="headings")
 col_specs = {
     "Type": dict(width=140, anchor="center"),
     "MAC Address": dict(width=170, anchor="center"),
-    "Vendor": dict(width=260, anchor="w"),
+    "Vendor": dict(width=260, anchor="center"),
     "IP Address": dict(width=150, anchor="center"),
     "Status": dict(width=100, anchor="center"),
 }
@@ -288,10 +269,6 @@ status_lbl = ttk.Label(status, textvariable=status_var, style="Sub.TLabel")
 count_lbl = ttk.Label(status, textvariable=count_var, style="Sub.TLabel")
 status_lbl.pack(side="left")
 count_lbl.pack(side="right")
-
-# Progress bar
-progress = ttk.Progressbar(status, mode="determinate", length=260)
-progress.pack(side="left", padx=(12, 0))
 
 # Context menu
 menu = tk.Menu(root, tearoff=0)
@@ -383,10 +360,6 @@ def poll_queue():
             insert_or_update_device(mac, vendor, ip, ts)
     except queue.Empty:
         pass
-
-    # Re-apply filter on the fly
-    apply_filter()
-
     root.after(QUEUE_POLL_MS, poll_queue)
 
 
@@ -412,34 +385,14 @@ def refresh_statuses():
     count_var.set(f"Devices: {len(known_devices)}  •  Active: {active}")
 
     if scan_thread and scan_thread.is_alive():
-        progress.configure(mode="indeterminate")
-        progress.start(12)
         elapsed = int(time.time() - scan_start_time) if scan_start_time else 0
         status_var.set(f"Scanning… {elapsed}s")
     else:
-        progress.stop()
-        progress.configure(mode="determinate", value=0)
+
         status_var.set("Scan stopped" if scan_start_time else "Ready to scan network")
 
     root.after(STATUS_REFRESH_MS, refresh_statuses)
 
-
-
-def apply_filter(*_):
-    # Show/hide rows according to filter query
-    needle = (filter_var.get() or "").strip().lower()
-    for iid in tree.get_children(""):
-        vals = tree.item(iid, "values")
-        show = True
-        if needle:
-            show = any(needle in str(v).lower() for v in vals)
-        try:
-            if show:
-                tree.reattach(iid, "", "end")
-            else:
-                tree.detach(iid)
-        except tk.TclError:
-            pass
 
 
 
@@ -511,8 +464,6 @@ def stop_scan():
 start_btn.configure(command=start_scan)
 stop_btn.configure(command=stop_scan)
 export_btn.configure(command=export_csv)
-clear_filter_btn.configure(command=lambda: (filter_var.set(""), apply_filter()))
-filter_var.trace_add("write", lambda *_: apply_filter())
 
 tree.bind("<Button-3>", popup_menu)  # right-click
 
