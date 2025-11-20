@@ -21,6 +21,7 @@ Version 2.0.0 - Custom network managment
 - [ ] Frontend UI for remote control
 - [ ] Raspberry Pi OS localization
 - [ ] Built in DNS-based filtering
+- [ ] Kill Switch
 
 ### Download
 1) To get started with version **1.0.x**, download the latest release here through this button:
@@ -32,3 +33,4 @@ Version 2.0.0 - Custom network managment
 3) Click on "NetworkScanner.exe" to download.
 
 4) In your device's file manager, navigate to "NetworkScanner.exe" and double click to run.
+
