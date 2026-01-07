@@ -7,7 +7,13 @@ from tkinter import filedialog, messagebox
 #=========Globals for thrread============
 stop_event = None
 scan_thread = None
-table_rows = []  # holds (mac, vendor, ip)
+table_rows = []  # holds (name, mac, vendor, ip)
+device_counter = 0
+
+def generate_device_name():
+    global device_counter
+    device_counter += 1
+    return f"device_{device_counter}"
 
 def export_csv():
     if not table_rows:
@@ -24,8 +30,10 @@ def export_csv():
     try:
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["Mac", "Vendor", "IP"])
-            w.writerows(table_rows)
+            w.writerow(["Name", "Mac", "Vendor", "IP"])
+            for row in table_rows:
+                w.writerow([row['name'], row['mac'], row['vendor'], row['ip']]) #export doesnt work
+            #w.writerows([table_rows]) #export doesnt work
         messagebox.showinfo("Export CSV", f"Saved to:\n{path}")
     except Exception as e:
         messagebox.showerror("Export CSV", f"Failed to save:\n{e}")
@@ -35,7 +43,7 @@ def export_csv():
 ctk.set_appearance_mode("dark")
 
 App_title = "Network Scanner version 1.0"
-App_geometry = "500x900"
+App_geometry = "600x900"
 Background_color = "#1f2937"
 panel_color = "#374151"
 button_color = "#3b82f6"
@@ -106,8 +114,8 @@ spinner.pack_forget()
 table_header = ctk.CTkFrame(mainbody, fg_color=panel_color)
 table_header.pack(fill="x", padx=10, pady=(10, 0))
 
-headers = ["Mac", "Vendor", "IP"]
-col_weights = [35, 35, 30]  # relative widths; tweak to taste
+headers = ["Name", "Mac", "Vendor", "IP"]
+col_weights = [30, 35, 35, 30]  # relative widths; tweak to taste
 
 for i, (h, w) in enumerate(zip(headers, col_weights)):
     table_header.grid_columnconfigure(i, weight=w)
@@ -135,17 +143,37 @@ def clear_rows():
     _row_iid = 0
     table_rows.clear()  # clear CSV data
 
-
-def insert_row(values):
- 
+def insert_row(values): #takes in device name, mac, vendor, ip
     global _row_iid
+
+    row_data = {
+        'name': values[0],
+        'mac': values[1], 
+        'vendor': values[2],
+        'ip': values[3]
+    }
+    
     pads = dict(padx=(0, 4), pady=(2, 2), sticky="ew")
+
+    #making the name column editable
+    name_entry = ctk.CTkEntry(table_body)
+    name_entry.insert(0, values[0])
+    name_entry.grid(row=_row_iid, column=0, **pads)
+
+    def on_name_change(event, data = row_data, entry = name_entry):
+        data['name'] = entry.get()
+
+    name_entry.bind("<FocusOut>", on_name_change)
+    name_entry.bind("<Return>", on_name_change)
+
     # one label per column, centered; you can change anchor="w" to left-align
-    ctk.CTkLabel(table_body, text=values[0], anchor="center").grid(row=_row_iid, column=0, **pads)
     ctk.CTkLabel(table_body, text=values[1], anchor="center").grid(row=_row_iid, column=1, **pads)
     ctk.CTkLabel(table_body, text=values[2], anchor="center").grid(row=_row_iid, column=2, **pads)
+    ctk.CTkLabel(table_body, text=values[3], anchor="center").grid(row=_row_iid, column=3, **pads)
     _row_iid += 1
     table_rows.append(tuple(values))  # save row for CSV
+    #table_rows.append(tuple(row_data))  # save row for CSV
+
 
 
 # ================= scan wiring (thread + callback) =================
@@ -179,7 +207,7 @@ def scan_callback(a, b, c):
     def ui_insert():
         counts["devices"] += 1
         counts["active"] += 1
-        insert_row((mac, vendor, ip))
+        insert_row((generate_device_name(), mac, vendor, ip))
         _update_status()
     app.after(0, ui_insert)
 
@@ -188,6 +216,8 @@ def start_scan():
     global stop_event, scan_thread
     if scan_thread and scan_thread.is_alive():
         return
+    global device_counter
+    device_counter = 0
     # reset table + counters
     clear_rows()
     seen.clear()
