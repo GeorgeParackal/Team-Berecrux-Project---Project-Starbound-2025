@@ -1,295 +1,395 @@
-import threading
-import queue
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-import importlib
-import inspect
-import time
-import csv
-import os
-import manuf
+import threading, queue, tkinter as tk
+from tkinter import ttk, messagebox, simpledialog, filedialog
+import importlib, inspect, network_scan
+import time, json, os, hashlib, csv
+
+# Force-reload scanner code
+importlib.reload(network_scan)
+run_scan = network_scan.run_scan
 
 # =========================
 # CONFIG
 # =========================
-APP_TITLE = "Network Device Scanner"
-BG_DARK = "#111827"  # slate-900
-CARD = "#1f2937"     # slate-800
-ACCENT = "#1f2937"   # blue-600
-ACCENT_HOVER = "#9ca3af"  # blue-700
-TEXT = "#e5e7eb"     # gray-200
-TEXT_MUTED = "#9ca3af"  # gray-400
-SUCCESS = "#22c55e"  # green-500
-DANGER = "#1f2937"   # red-500
-WARNING = "#f59e0b"  # amber-500
-ROW_ALT = "#111827"
+APP_TITLE = "Multi-Network Scanner Pro v2.1"
+BG_DARK = "#2C3E50"
+CARD = "#34495E"
+ACCENT = "#3498DB"
+ACCENT_HOVER = "#2980B9"
+TEXT = "#ECF0F1"
+TEXT_MUTED = "#BDC3C7"
+SUCCESS = "#27AE60"
+DANGER = "#E74C3C"
+WARNING = "#F39C12"
 
-DEVICE_TTL = 60  # seconds of inactivity before a device is marked inactive
-QUEUE_POLL_MS = 100
-STATUS_REFRESH_MS = 1000
+class MultiNetworkScanner:
+    def __init__(self):
+        self.q = queue.Queue()
+        self.scan_thread = None
+        self.stop_event = threading.Event()
+        self.known_devices = {}
+        self.scan_start_time = None
+        self.protected_networks = self.load_protected_networks()
+        self.current_networks = []
+        
+        self.setup_gui()
+        self.show_disclaimer()
+    
+    def load_protected_networks(self):
+        """Load password-protected networks from file"""
+        if os.path.exists("protected_networks.json"):
+            with open("protected_networks.json", 'r') as f:
+                return json.load(f)
+        return {}
+    
+    def save_protected_networks(self):
+        """Save protected networks to file"""
+        with open("protected_networks.json", 'w') as f:
+            json.dump(self.protected_networks, f, indent=2)
+    
+    def show_disclaimer(self):
+        """Show legal disclaimer"""
+        disclaimer = """⚠️ LEGAL DISCLAIMER ⚠️
 
-# =========================
-# Best-effort import and live-reload of user scanner
-# If unavailable, fall back to a local mock generator so the UI still shines.
-# =========================
-run_scan = None
+This network scanner should ONLY be used on:
+• Networks you own
+• Networks you have explicit permission to scan
+• Your home/personal networks
 
-try:
-    import network_scan  # expected to expose run_scan(callback(mac,vendor,ip), stop_event)
-    importlib.reload(network_scan)
-    if hasattr(network_scan, "run_scan") and inspect.isfunction(network_scan.run_scan):
-        run_scan = network_scan.run_scan
-except Exception as e:
-    # We'll gracefully fall back to a mock below
-    run_scan = None
+UNAUTHORIZED NETWORK SCANNING IS ILLEGAL
 
+By clicking 'I Agree', you confirm:
+✓ You own or have permission to scan target networks
+✓ You will not use this tool for malicious purposes
+✓ You understand legal consequences of unauthorized scanning
 
-def _mock_run_scan(on_new_device, stop_event):
-    """A friendly mock scanner that emits pretend devices for demo/hire-me runs."""
-    vendors = [
-        ("D4:6A:6C:AA:01:22", "Ubiquiti Networks", "192.168.1.1"),      # Router
-        ("B8:27:EB:12:34:56", "Raspberry Pi Foundation", "192.168.1.42"),
-        ("F0:99:B6:77:88:99", "Apple, Inc.", "192.168.1.12"),
-        ("60:AB:67:00:00:01", "Samsung Electronics", "192.168.1.33"),
-        ("3C:5A:B4:DE:AD:BE", "Intel Corporate", "192.168.1.24"),
-    ]
-    i = 0
-    while not stop_event.is_set():
-        mac, vendor, base_ip = vendors[i % len(vendors)]
-        # randomly jitter IP last octet for mock 'movement'
-        ip = base_ip.rsplit('.', 1)[0] + f".{10 + (i % 50)}"
-        on_new_device(mac, vendor, ip)
-        i += 1
-        time.sleep(0.6)
+For unknown/protected devices:
+• Router manufacturers may not share device names for privacy
+• Some devices intentionally hide their identity for security"""
+        
+        result = messagebox.askyesno("Legal Disclaimer", disclaimer)
+        if not result:
+            self.root.destroy()
+            return
+    
+    def hash_password(self, password):
+        """Hash password for storage"""
+        return hashlib.sha256(password.encode()).hexdigest()
+    
+    def check_network_access(self, network_range):
+        """Check if network requires password"""
+        if network_range in self.protected_networks:
+            password = simpledialog.askstring(
+                "Protected Network", 
+                f"Network {network_range} is password protected.\nEnter password:",
+                show='*'
+            )
+            if not password:
+                return False
+            
+            hashed = self.hash_password(password)
+            if hashed != self.protected_networks[network_range]:
+                messagebox.showerror("Access Denied", "Incorrect password!")
+                return False
+        return True
+    
+    def protect_network(self):
+        """Add password protection to a network"""
+        network = simpledialog.askstring("Protect Network", "Enter network range (e.g., 192.168.1.0/24):")
+        if not network:
+            return
+        
+        password = simpledialog.askstring("Set Password", "Enter protection password:", show='*')
+        if not password:
+            return
+        
+        confirm = simpledialog.askstring("Confirm Password", "Confirm password:", show='*')
+        if password != confirm:
+            messagebox.showerror("Error", "Passwords don't match!")
+            return
+        
+        self.protected_networks[network] = self.hash_password(password)
+        self.save_protected_networks()
+        messagebox.showinfo("Success", f"Network {network} is now protected!")
+    
+    def get_network_ranges(self):
+        """Get multiple network ranges to scan"""
+        networks = []
+        
+        # Default current network
+        try:
+            import get_local_ip_address as host_ip
+            from ipaddress import IPv4Interface
+            host_ip_address = host_ip.get_local_ip_address()
+            default_network = str(IPv4Interface(host_ip_address + '/24').network)
+            networks.append(default_network)
+        except:
+            pass
+        
+        # Ask for additional networks
+        while True:
+            network = simpledialog.askstring(
+                "Multi-Network Scan", 
+                f"Current networks: {networks}\n\nAdd another network range? (e.g., 192.168.2.0/24)\nLeave empty to start scan:"
+            )
+            if not network:
+                break
+            
+            # Check access permission
+            if self.check_network_access(network):
+                networks.append(network)
+            else:
+                messagebox.showwarning("Access Denied", f"Cannot scan protected network: {network}")
+        
+        return networks
+    
+    def on_new_device(self, mac, vendor, ip, network=None):
+        """Handle new device discovery"""
+        # Privacy protection for unknown devices
+        if vendor.lower() in ['unknown', '', 'n/a']:
+            vendor = "🔒 Protected Identity"
+        
+        self.q.put((mac, vendor, ip, network or "Unknown"))
+    
+    def device_type_from_vendor(self, vendor):
+        """Determine device type from vendor"""
+        v = vendor.lower()
+        if "router" in v or "gateway" in v or "ubiquiti" in v:
+            return "🌐 Router"
+        elif "apple" in v:
+            return "🍎 Apple"
+        elif "samsung" in v:
+            return "📱 Samsung"
+        elif "protected" in v:
+            return "🔒 Protected"
+        elif "raspberry" in v:
+            return "🧪 Raspberry Pi"
+        else:
+            return "💻 Device"
+    
+    def poll_queue(self):
+        """Process device queue"""
+        try:
+            while True:
+                mac, vendor, ip, network = self.q.get_nowait()
+                
+                device_type = self.device_type_from_vendor(vendor)
+                device_key = f"{mac}_{network}"
+                
+                if device_key in self.known_devices:
+                    item_id = self.known_devices[device_key]
+                    current_values = self.tree.item(item_id, "values")
+                    if current_values != (device_type, mac, vendor, ip, network, "Active"):
+                        self.tree.item(item_id, values=(device_type, mac, vendor, ip, network, "Active"))
+                else:
+                    item_id = self.tree.insert("", "end", values=(device_type, mac, vendor, ip, network, "Active"))
+                    self.known_devices[device_key] = item_id
+        
+        except queue.Empty:
+            pass
+        
+        self.root.after(100, self.poll_queue)
+    
+    def start_scan(self):
+        """Start multi-network scan"""
+        networks = self.get_network_ranges()
+        if not networks:
+            messagebox.showwarning("No Networks", "No networks selected for scanning!")
+            return
+        
+        self.current_networks = networks
+        
+        # Clear previous data
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self.known_devices.clear()
+        self.scan_start_time = time.time()
+        
+        # Create new stop event
+        self.stop_event = threading.Event()
+        
+        # Start scan thread for multiple networks
+        self.scan_thread = threading.Thread(
+            target=self.multi_network_scan,
+            args=(networks,),
+            daemon=True
+        )
+        self.scan_thread.start()
+        
+        self.start_btn.config(state="disabled")
+        self.stop_btn.config(state="normal")
+        self.update_progress()
+    
+    def multi_network_scan(self, networks):
+        """Scan multiple networks"""
+        for network in networks:
+            if self.stop_event.is_set():
+                break
+            
+            # Modified callback to include network info
+            def network_callback(mac, vendor, ip):
+                self.on_new_device(mac, vendor, ip, network)
+            
+            # Run scan for this network
+            try:
+                run_scan(network_callback, self.stop_event, target_network=network)
+            except Exception as e:
+                print(f"Error scanning {network}: {e}")
+    
+    def stop_scan(self):
+        """Stop scanning"""
+        if self.stop_event:
+            self.stop_event.set()
+        self.start_btn.config(state="normal")
+        self.stop_btn.config(state="disabled")
+        self.update_progress()
+    
+    def export_csv(self):
+        """Export device list to CSV"""
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        if not filename:
+            return
+        
+        try:
+            with open(filename, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Device Type", "MAC Address", "Vendor", "IP Address", "Network", "Status"])
+                
+                for item in self.tree.get_children():
+                    values = self.tree.item(item, "values")
+                    writer.writerow(values)
+            
+            messagebox.showinfo("Export Complete", f"Device list exported to {filename}")
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export: {e}")
+    
+    def update_progress(self):
+        """Update progress bar"""
+        if self.scan_thread and self.scan_thread.is_alive():
+            self.progress_bar['mode'] = 'indeterminate'
+            self.progress_bar.start(10)
+            elapsed = time.time() - self.scan_start_time if self.scan_start_time else 0
+            self.status_var.set(f"Multi-network scanning... ({elapsed:.0f}s)")
+        else:
+            self.progress_bar.stop()
+            self.progress_bar['mode'] = 'determinate'
+            self.progress_bar['value'] = 0
+            self.status_var.set("Scan stopped")
+    
+    def setup_gui(self):
+        """Setup the GUI"""
+        self.root = tk.Tk()
+        self.root.title(APP_TITLE)
+        self.root.geometry("1000x700")
+        self.root.configure(bg=BG_DARK)
+        
+        # Style configuration
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('Title.TLabel', font=('Arial', 16, 'bold'), background=BG_DARK, foreground=TEXT)
+        style.configure('Header.TFrame', background=CARD)
+        style.configure('Treeview', background=TEXT, foreground=BG_DARK, fieldbackground=TEXT)
+        style.configure('Treeview.Heading', background=ACCENT, foreground='white', font=('Arial', 10, 'bold'))
+        style.map('Treeview', background=[('selected', ACCENT)])
+        
+        # Header
+        header_frame = ttk.Frame(self.root, style='Header.TFrame')
+        header_frame.pack(fill='x', padx=10, pady=(10, 5))
+        
+        title_label = ttk.Label(header_frame, text="🔍 Multi-Network Scanner Pro", style='Title.TLabel')
+        title_label.pack(pady=10)
+        
+        # Main frame
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        # Device list
+        tree_frame = ttk.Frame(main_frame)
+        tree_frame.pack(fill='both', expand=True, pady=(0, 10))
+        
+        columns = ("Type", "MAC Address", "Vendor", "IP Address", "Network", "Status")
+        self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=15)
+        
+        # Configure columns
+        self.tree.heading('Type', text='Device Type', anchor='center')
+        self.tree.column('Type', width=120, anchor='center')
+        self.tree.heading('MAC Address', text='MAC Address', anchor='center')
+        self.tree.column('MAC Address', width=140, anchor='center')
+        self.tree.heading('Vendor', text='Vendor/Manufacturer', anchor='center')
+        self.tree.column('Vendor', width=180, anchor='center')
+        self.tree.heading('IP Address', text='IP Address', anchor='center')
+        self.tree.column('IP Address', width=120, anchor='center')
+        self.tree.heading('Network', text='Network Range', anchor='center')
+        self.tree.column('Network', width=140, anchor='center')
+        self.tree.heading('Status', text='Status', anchor='center')
+        self.tree.column('Status', width=80, anchor='center')
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(tree_frame, orient='vertical', command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+        
+        # Control panel
+        control_frame = ttk.LabelFrame(main_frame, text="Multi-Network Controls", padding=10)
+        control_frame.pack(fill='x', pady=(0, 10))
+        
+        # Progress bar
+        progress_frame = ttk.Frame(control_frame)
+        progress_frame.pack(fill='x', pady=(0, 10))
+        
+        progress_label = ttk.Label(progress_frame, text="Scan Progress:")
+        progress_label.pack(anchor='w')
+        
+        self.progress_bar = ttk.Progressbar(progress_frame, mode='determinate', length=400)
+        self.progress_bar.pack(fill='x', pady=(5, 0))
+        
+        # Buttons
+        button_frame = ttk.Frame(control_frame)
+        button_frame.pack(fill='x')
+        
+        self.start_btn = ttk.Button(button_frame, text="🚀 Start Multi-Network Scan", command=self.start_scan)
+        self.start_btn.pack(side='left', padx=(0, 10))
+        
+        self.stop_btn = ttk.Button(button_frame, text="⏹️ Stop Scan", command=self.stop_scan, state='disabled')
+        self.stop_btn.pack(side='left', padx=(0, 10))
+        
+        protect_btn = ttk.Button(button_frame, text="🔒 Protect Network", command=self.protect_network)
+        protect_btn.pack(side='left', padx=(0, 10))
+        
+        export_btn = ttk.Button(button_frame, text="📄 Export CSV", command=self.export_csv)
+        export_btn.pack(side='left', padx=(0, 10))
+        
+        # Status bar
+        status_frame = ttk.Frame(self.root)
+        status_frame.pack(fill='x', side='bottom', padx=10, pady=(0, 10))
+        
+        self.status_var = tk.StringVar(value="Ready for multi-network scan")
+        self.status_label = ttk.Label(status_frame, textvariable=self.status_var, font=('Arial', 9))
+        self.status_label.pack(anchor='w')
+        
+        self.device_count_var = tk.StringVar(value="Devices found: 0")
+        self.device_count_label = ttk.Label(status_frame, textvariable=self.device_count_var, font=('Arial', 9))
+        self.device_count_label.pack(anchor='e')
+    
+    def update_device_count(self):
+        """Update device count"""
+        self.device_count_var.set(f"Devices found: {len(self.known_devices)}")
+        if self.scan_thread and self.scan_thread.is_alive():
+            self.update_progress()
+        self.root.after(1000, self.update_device_count)
+    
+    def run(self):
+        """Start the application"""
+        self.update_device_count()
+        self.poll_queue()
+        self.root.mainloop()
 
-
-if run_scan is None:
-    run_scan = _mock_run_scan
-
-# =========================
-# App State
-# =========================
-q = queue.Queue()
-scan_thread = None
-stop_event = threading.Event()
-scan_start_time = None
-
-# MAC -> Tk item id
-known_devices = {}
-# MAC -> last_seen epoch
-last_seen = {}
-
-# =========================
-# UI Helpers
-# =========================
-
-def apply_styles(root):
-    style = ttk.Style(root)
-    try:
-        style.theme_use("clam")
-    except tk.TclError:
-        pass
-
-    # Global colors
-    root.configure(bg=BG_DARK)
-
-    style.configure("TFrame", background=BG_DARK)
-    style.configure("Card.TFrame", background=CARD)
-
-    style.configure("Title.TLabel", font=("Segoe UI", 18, "bold"), foreground=TEXT, background=BG_DARK)
-    style.configure("Sub.TLabel", font=("Segoe UI", 10), foreground=TEXT_MUTED, background=BG_DARK)
-    style.configure("Info.TLabel", font=("Segoe UI", 10), foreground=TEXT, background=CARD)
-
-    style.configure("TButton", font=("Segoe UI", 10, "bold"), padding=8)
-    style.map(
-        "TButton",
-        background=[("active", ACCENT_HOVER)],
-        foreground=[("disabled", TEXT_MUTED)],
-    )
-
-    style.configure("Accent.TButton", background=ACCENT, foreground="white", borderwidth=0)
-    style.map("Accent.TButton", background=[("active", ACCENT_HOVER)])
-
-    style.configure("Danger.TButton", background=DANGER, foreground="white", borderwidth=0)
-    style.map("Danger.TButton", background=[("active", "#dc2626")])
-
-    # Treeview
-    style.configure(
-        "Treeview",
-        background=CARD,
-        foreground=TEXT,
-        fieldbackground=CARD,
-        rowheight=28,
-        font=("Segoe UI", 10),
-        borderwidth=0,
-    )
-    style.map("Treeview", background=[("selected", ACCENT)])
-    style.configure(
-        "Treeview.Heading",
-        background=ACCENT,
-        foreground="white",
-        font=("Segoe UI", 10, "bold"),
-        borderwidth=0,
-    )
-
-
-# =========================
-# Core logic
-# =========================
-
-def on_new_device(mac, vendor, ip):
-    if not mac:
-        return
-    vendor = vendor or "Unknown"
-    ip = ip or "—"
-    q.put((mac, vendor, ip, time.time()))
-
-
-def device_type_from_vendor(vendor: str) -> str:
-    v = vendor.lower()
-    if "router" in v or "gateway" in v or "ubiquiti" in v or "netgear" in v or "tp-link" in v or "mikrotik" in v:
-        return "🌐 Router"
-    if "apple" in v:
-        return "🍎 Apple"
-    if "samsung" in v:
-        return "📱 Samsung"
-    if "raspberry" in v:
-        return "🧪 Raspberry Pi"
-    if "intel" in v or "microsoft" in v or "dell" in v or "hp " in v:
-        return "💻 Device"
-    return "🔧 Device"
-
-
-# Sorting helpers
-sort_state = {}
-
-def sort_by_column(tree, col):
-    data = [(tree.set(k, col), k) for k in tree.get_children("")]
-
-    # Detect type
-    def as_key(val):
-        # IP-aware sort
-        if col == "IP Address" and val and val != "—":
-            parts = val.split(".")
-            if len(parts) == 4 and all(p.isdigit() for p in parts):
-                return tuple(int(p) for p in parts)
-        # status priority
-        if col == "Status":
-            order = {"Active": 0, "Inactive": 1}
-            return order.get(val, 2)
-        return val.lower() if isinstance(val, str) else val
-
-    reverse = sort_state.get(col, False)
-    data.sort(key=lambda x: as_key(x[0]), reverse=reverse)
-    for index, (_, k) in enumerate(data):
-        tree.move(k, "", index)
-    sort_state[col] = not reverse
-
-
-# =========================
-# Tk App
-# =========================
-root = tk.Tk()
-root.title(APP_TITLE)
-root.geometry("980x660")
-root.minsize(780, 520)
-
-apply_styles(root)
-
-# --- Header ---
-header = ttk.Frame(root, style="TFrame")
-header.pack(fill="x", padx=16, pady=(16, 8))
-
-lbl_title = ttk.Label(header, text=APP_TITLE, style="Title.TLabel")
-lbl_title.pack(anchor="w")
-
-lbl_sub = ttk.Label(
-    header,
-    text="Version 1.0 Offline Scanner - Designed for proof of concept",
-    style="Sub.TLabel",
-)
-lbl_sub.pack(anchor="w", pady=(6, 0))
-
-# --- Controls Card ---
-controls_card = ttk.Frame(root, style="Card.TFrame", padding=14)
-controls_card.pack(fill="x", padx=16, pady=8)
-
-btn_frame = ttk.Frame(controls_card, style="Card.TFrame")
-btn_frame.pack(side="left")
-
-start_btn = ttk.Button(btn_frame, text="Start Scan", style="Accent.TButton")
-stop_btn = ttk.Button(btn_frame, text="Stop Scan", style="Accent.TButton", state="disabled")
-export_btn = ttk.Button(btn_frame, text="Export CSV", style="Accent.TButton")
-
-start_btn.grid(row=0, column=0, padx=(0, 8))
-stop_btn.grid(row=0, column=1, padx=8)
-export_btn.grid(row=0, column=2, padx=8)
-
-
-# --- Tree Card ---
-list_card = ttk.Frame(root, style="Card.TFrame", padding=12)
-list_card.pack(fill="both", expand=True, padx=16, pady=(8, 16))
-
-columns = ("Type", "MAC Address", "Vendor", "IP Address", "Status")
-tree = ttk.Treeview(list_card, columns=columns, show="headings")
-
-# Configure columns
-col_specs = {
-    "Type": dict(width=140, anchor="center"),
-    "MAC Address": dict(width=170, anchor="center"),
-    "Vendor": dict(width=260, anchor="center"),
-    "IP Address": dict(width=150, anchor="center"),
-    "Status": dict(width=100, anchor="center"),
-}
-
-for col in columns:
-    tree.heading(col, text=col, anchor="center", command=lambda c=col: sort_by_column(tree, c))
-    tree.column(col, **col_specs[col])
-
-# Scrollbar
-scrollbar = ttk.Scrollbar(list_card, orient="vertical", command=tree.yview)
-tree.configure(yscrollcommand=scrollbar.set)
-
-# Layout
-tree.pack(side="left", fill="both", expand=True)
-scrollbar.pack(side="right", fill="y")
-
-# Row tags for styling
-tree.tag_configure("inactive", foreground=TEXT_MUTED)
-tree.tag_configure("alt", background=ROW_ALT)
-
-# --- Status Bar ---
-status = ttk.Frame(root, style="TFrame")
-status.pack(fill="x", padx=16, pady=(0, 12))
-
-status_var = tk.StringVar(value="Ready to scan network")
-count_var = tk.StringVar(value="Devices: 0")
-
-status_lbl = ttk.Label(status, textvariable=status_var, style="Sub.TLabel")
-count_lbl = ttk.Label(status, textvariable=count_var, style="Sub.TLabel")
-status_lbl.pack(side="left")
-count_lbl.pack(side="right")
-
-# Context menu
-menu = tk.Menu(root, tearoff=0)
-menu.add_command(label="Copy MAC", command=lambda: copy_col(1))
-menu.add_command(label="Copy IP", command=lambda: copy_col(3))
-menu.add_separator()
-menu.add_command(label="Ping (opens terminal)", command=lambda: ping_selected())
-
-
-def popup_menu(event):
-    iid = tree.identify_row(event.y)
-    if iid:
-        tree.selection_set(iid)
-        menu.tk_popup(event.x_root, event.y_root)
-
-
-# =========================
-# Behaviors
-# =========================
-
-def copy_col(idx):
+if __name__ == "__main__":
+    app = MultiNetworkScanner()
+    app.run()_col(idx):
     sel = tree.selection()
     if not sel:
         return

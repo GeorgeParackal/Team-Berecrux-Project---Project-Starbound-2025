@@ -2,12 +2,127 @@ import customtkinter as ctk
 import threading
 import network_scan as ns
 import csv
-from tkinter import filedialog, messagebox
+import json
+import os
+import hashlib
+from tkinter import filedialog, messagebox, simpledialog
 
-#=========Globals for thrread============
+#=========Globals for thread============
 stop_event = None
 scan_thread = None
-table_rows = []  # holds (mac, vendor, ip)
+table_rows = []  # holds (mac, vendor, ip, network)
+protected_networks = {}
+current_networks = []
+
+def load_protected_networks():
+    """Load password-protected networks from file"""
+    global protected_networks
+    if os.path.exists("protected_networks.json"):
+        with open("protected_networks.json", 'r') as f:
+            protected_networks = json.load(f)
+    return protected_networks
+
+def save_protected_networks():
+    """Save protected networks to file"""
+    with open("protected_networks.json", 'w') as f:
+        json.dump(protected_networks, f, indent=2)
+
+def hash_password(password):
+    """Hash password for storage"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def show_disclaimer():
+    """Show legal disclaimer"""
+    disclaimer = """⚠️ LEGAL DISCLAIMER ⚠️
+
+This network scanner should ONLY be used on:
+• Networks you own
+• Networks you have explicit permission to scan
+• Your home/personal networks
+
+UNAUTHORIZED NETWORK SCANNING IS ILLEGAL
+
+By clicking 'OK', you confirm:
+✓ You own or have permission to scan target networks
+✓ You will not use this tool for malicious purposes
+✓ You understand legal consequences of unauthorized scanning
+
+For unknown/protected devices:
+• Router manufacturers may not share device names for privacy
+• Some devices intentionally hide their identity for security"""
+    
+    result = messagebox.askokcancel("Legal Disclaimer", disclaimer)
+    if not result:
+        app.quit()
+        return False
+    return True
+
+def check_network_access(network_range):
+    """Check if network requires password"""
+    if network_range in protected_networks:
+        password = simpledialog.askstring(
+            "Protected Network", 
+            f"Network {network_range} is password protected.\nEnter password:",
+            show='*'
+        )
+        if not password:
+            return False
+        
+        hashed = hash_password(password)
+        if hashed != protected_networks[network_range]:
+            messagebox.showerror("Access Denied", "Incorrect password!")
+            return False
+    return True
+
+def protect_network():
+    """Add password protection to a network"""
+    network = simpledialog.askstring("Protect Network", "Enter network range (e.g., 192.168.1.0/24):")
+    if not network:
+        return
+    
+    password = simpledialog.askstring("Set Password", "Enter protection password:", show='*')
+    if not password:
+        return
+    
+    confirm = simpledialog.askstring("Confirm Password", "Confirm password:", show='*')
+    if password != confirm:
+        messagebox.showerror("Error", "Passwords don't match!")
+        return
+    
+    protected_networks[network] = hash_password(password)
+    save_protected_networks()
+    messagebox.showinfo("Success", f"Network {network} is now protected!")
+
+def get_network_ranges():
+    """Get multiple network ranges to scan"""
+    networks = []
+    
+    # Default current network
+    try:
+        import get_local_ip_address as host_ip
+        from ipaddress import IPv4Interface
+        host_ip_address = host_ip.get_local_ip_address()
+        default_network = str(IPv4Interface(host_ip_address + '/24').network)
+        networks.append(default_network)
+    except:
+        pass
+    
+    # Ask for additional networks
+    while True:
+        network = simpledialog.askstring(
+            "Multi-Network Scan", 
+            f"Current networks: {networks}\n\nAdd another network range? (e.g., 192.168.2.0/24)\nLeave empty to start scan:"
+        )
+        if not network:
+            break
+        
+        # Check access permission
+        if check_network_access(network):
+            networks.append(network)
+        else:
+            messagebox.showwarning("Access Denied", f"Cannot scan protected network: {network}")
+    
+    return networks
 
 def export_csv():
     if not table_rows:
@@ -24,7 +139,7 @@ def export_csv():
     try:
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["Mac", "Vendor", "IP"])
+            w.writerow(["Mac", "Vendor", "IP", "Network"])
             w.writerows(table_rows)
         messagebox.showinfo("Export CSV", f"Saved to:\n{path}")
     except Exception as e:
@@ -34,20 +149,25 @@ def export_csv():
 # ================== configs =================
 ctk.set_appearance_mode("dark")
 
-App_title = "Network Scanner version 1.0"
-App_geometry = "500x900"
+App_title = "Multi-Network Scanner Pro v2.1"
+App_geometry = "600x900"
 Background_color = "#1f2937"
 panel_color = "#374151"
 button_color = "#3b82f6"
 #=============================================
 
 #===================Initialize App============
+load_protected_networks()  # Load protected networks on startup
+
 app = ctk.CTk()
 app.title(App_title)
 app.geometry(App_geometry)
 app.resizable(False, False)
 app.configure(fg_color=Background_color)
 app.grid_columnconfigure(0, weight=1)
+
+# Show disclaimer on startup
+app.after(100, show_disclaimer)
 #=============================================
 
 # ================Header ====================
@@ -55,8 +175,8 @@ header = ctk.CTkFrame(app, fg_color=Background_color)
 header.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 6))
 header.grid_columnconfigure(0, weight=1)
 
-title = ctk.CTkLabel(header, text="Network Device Scanner",font=ctk.CTkFont(size=28, weight="bold"))
-subtitle = ctk.CTkLabel(header, text="Version 1.0 Offline Scanner - Designed for proof of concept",font=ctk.CTkFont(size=13))
+title = ctk.CTkLabel(header, text="🔍 Multi-Network Scanner Pro",font=ctk.CTkFont(size=28, weight="bold"))
+subtitle = ctk.CTkLabel(header, text="Version 2.1 - Multi-Network Support with Password Protection",font=ctk.CTkFont(size=13))
 title.grid(row=0, column=0, sticky="ew", pady=(0,2))
 subtitle.grid(row=1, column=0, sticky="ew")
 #=============================================
@@ -65,13 +185,15 @@ subtitle.grid(row=1, column=0, sticky="ew")
 toolbar = ctk.CTkFrame(app, fg_color=panel_color, corner_radius=6)
 toolbar.grid(row=1, column=0, sticky="ew", padx=14, pady=6)
 
-btn_start = ctk.CTkButton(toolbar, text="Start Scan", fg_color=button_color, hover_color="#000000")
-btn_stop  = ctk.CTkButton(toolbar, text="Stop Scan", state="disabled")
-btn_csv   = ctk.CTkButton(toolbar, text="Export CSV", fg_color=button_color, hover_color="#000000", command=export_csv)
+btn_start = ctk.CTkButton(toolbar, text="🚀 Start Multi-Scan", fg_color=button_color, hover_color="#000000")
+btn_stop  = ctk.CTkButton(toolbar, text="⏹️ Stop Scan", state="disabled")
+btn_protect = ctk.CTkButton(toolbar, text="🔒 Protect Network", fg_color="#dc2626", hover_color="#b91c1c", command=protect_network)
+btn_csv   = ctk.CTkButton(toolbar, text="📄 Export CSV", fg_color=button_color, hover_color="#000000", command=export_csv)
 
 btn_start.grid(row=0, column=0, padx=(12, 8), pady=12)
 btn_stop.grid (row=0, column=1, padx=8, pady=12)
-btn_csv.grid  (row=0, column=2, padx=8, pady=12)
+btn_protect.grid(row=0, column=2, padx=8, pady=12)
+btn_csv.grid  (row=0, column=3, padx=8, pady=12)
 #=============================================
 
 # =====Main-Body================================
@@ -106,8 +228,8 @@ spinner.pack_forget()
 table_header = ctk.CTkFrame(mainbody, fg_color=panel_color)
 table_header.pack(fill="x", padx=10, pady=(10, 0))
 
-headers = ["Mac", "Vendor", "IP"]
-col_weights = [35, 35, 30]  # relative widths; tweak to taste
+headers = ["Mac", "Vendor", "IP", "Network"]
+col_weights = [25, 30, 25, 20]  # relative widths; tweak to taste
 
 for i, (h, w) in enumerate(zip(headers, col_weights)):
     table_header.grid_columnconfigure(i, weight=w)
@@ -137,13 +259,13 @@ def clear_rows():
 
 
 def insert_row(values):
- 
     global _row_iid
     pads = dict(padx=(0, 4), pady=(2, 2), sticky="ew")
     # one label per column, centered; you can change anchor="w" to left-align
     ctk.CTkLabel(table_body, text=values[0], anchor="center").grid(row=_row_iid, column=0, **pads)
     ctk.CTkLabel(table_body, text=values[1], anchor="center").grid(row=_row_iid, column=1, **pads)
     ctk.CTkLabel(table_body, text=values[2], anchor="center").grid(row=_row_iid, column=2, **pads)
+    ctk.CTkLabel(table_body, text=values[3], anchor="center").grid(row=_row_iid, column=3, **pads)
     _row_iid += 1
     table_rows.append(tuple(values))  # save row for CSV
 
@@ -166,24 +288,57 @@ def _spinner_off():
     spinner.pack_forget()
 
 
-def scan_callback(a, b, c):
+def scan_callback(a, b, c, network="Unknown"):
     # ("error","scan_failed", msg) OR (mac, vendor, ip)
     if a == "error":
         app.after(0, lambda: status_label.configure(text=f"Error: {c}"))
         return
     mac, vendor, ip = a, b, c
-    if mac in seen:
+    
+    # Privacy protection for unknown devices
+    if vendor.lower() in ['unknown', '', 'n/a']:
+        vendor = "🔒 Protected Identity"
+    
+    device_key = f"{mac}_{network}"
+    if device_key in seen:
         return
-    seen.add(mac)
+    seen.add(device_key)
 
     def ui_insert():
         counts["devices"] += 1
         counts["active"] += 1
-        insert_row((mac, vendor, ip))
+        insert_row((mac, vendor, ip, network))
         _update_status()
     app.after(0, ui_insert)
 
+def multi_network_scan(networks):
+    """Scan multiple networks"""
+    for network in networks:
+        if stop_event and stop_event.is_set():
+            break
+        
+        app.after(0, lambda n=network: status_label.configure(text=f"Scanning: {n}"))
+        
+        # Modified callback to include network info
+        def network_callback(mac, vendor, ip):
+            scan_callback(mac, vendor, ip, network)
+        
+        # Run scan for this network
+        try:
+            ns.run_scan(network_callback, stop_event, target_network=network)
+        except Exception as e:
+            print(f"Error scanning {network}: {e}")
+
 def start_scan():
+    # Get network ranges to scan
+    networks = get_network_ranges()
+    if not networks:
+        messagebox.showwarning("No Networks", "No networks selected for scanning!")
+        return
+    
+    global current_networks
+    current_networks = networks
+    
     _spinner_on()
     global stop_event, scan_thread
     if scan_thread and scan_thread.is_alive():
@@ -199,8 +354,8 @@ def start_scan():
 
     stop_event = threading.Event()
     scan_thread = threading.Thread(
-        target=ns.run_scan,
-        kwargs={"callback": scan_callback, "stop_event": stop_event, "interval": 15},
+        target=multi_network_scan,
+        args=(networks,),
         daemon=True,
     )
     scan_thread.start()
