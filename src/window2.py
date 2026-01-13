@@ -206,7 +206,7 @@ def export_csv():
 ctk.set_appearance_mode("dark")
 
 App_title = "Multi-Network Scanner Pro v2.1"
-App_geometry = "800x900"
+App_geometry = "975x900"
 Background_color = "#1f2937"
 panel_color = "#374151"
 button_color = "#3b82f6"
