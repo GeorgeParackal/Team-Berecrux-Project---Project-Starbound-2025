@@ -31,6 +31,34 @@ def hash_password(password):
     """Hash password for storage"""
     return hashlib.sha256(password.encode()).hexdigest()
 
+def show_security_info():
+    """Show security information about password protection"""
+    info = """🔒 SECURITY INFORMATION 🔒
+
+⚠️ IMPORTANT LIMITATIONS ⚠️
+
+Password protection is LOCAL ONLY:
+• Only protects THIS device/installation
+• Other devices with this program can scan freely
+• Protection is stored in 'protected_networks.json'
+• Deleting the file removes ALL protection
+
+🔄 PASSWORD RESET:
+• Use '🔓 Reset Password' button
+• Completely removes protection
+• Network becomes scannable by anyone
+
+🌐 NETWORK-LEVEL SECURITY:
+For real protection, configure your router:
+• Disable network discovery
+• Enable MAC address filtering
+• Use strong WiFi passwords
+• Enable firewall rules
+
+🚨 This tool's password protection is for workflow management, NOT network security!"""
+    
+    messagebox.showinfo("Security Information", info)
+
 def show_disclaimer():
     """Show legal disclaimer"""
     disclaimer = """⚠️ LEGAL DISCLAIMER ⚠️
@@ -93,6 +121,34 @@ def protect_network():
     save_protected_networks()
     messagebox.showinfo("Success", f"Network {network} is now protected!")
 
+def reset_network_password():
+    """Reset password for a protected network"""
+    if not protected_networks:
+        messagebox.showinfo("No Protected Networks", "No networks are currently protected.")
+        return
+    
+    # Show list of protected networks
+    network_list = "\n".join([f"• {net}" for net in protected_networks.keys()])
+    network = simpledialog.askstring(
+        "Reset Network Password", 
+        f"Protected networks:\n{network_list}\n\nEnter network to reset password:"
+    )
+    
+    if not network or network not in protected_networks:
+        messagebox.showerror("Error", "Network not found in protected list!")
+        return
+    
+    # Confirm reset
+    confirm = messagebox.askyesno(
+        "Confirm Reset", 
+        f"⚠️ WARNING ⚠️\n\nThis will REMOVE password protection from:\n{network}\n\nAnyone can scan this network after reset!\n\nContinue?"
+    )
+    
+    if confirm:
+        del protected_networks[network]
+        save_protected_networks()
+        messagebox.showinfo("Password Reset", f"Password protection removed from {network}\n\n⚠️ Network is now unprotected!")
+
 def get_network_ranges():
     """Get multiple network ranges to scan"""
     networks = []
@@ -150,7 +206,7 @@ def export_csv():
 ctk.set_appearance_mode("dark")
 
 App_title = "Multi-Network Scanner Pro v2.1"
-App_geometry = "600x900"
+App_geometry = "800x900"
 Background_color = "#1f2937"
 panel_color = "#374151"
 button_color = "#3b82f6"
@@ -188,12 +244,17 @@ toolbar.grid(row=1, column=0, sticky="ew", padx=14, pady=6)
 btn_start = ctk.CTkButton(toolbar, text="🚀 Start Multi-Scan", fg_color=button_color, hover_color="#000000")
 btn_stop  = ctk.CTkButton(toolbar, text="⏹️ Stop Scan", state="disabled")
 btn_protect = ctk.CTkButton(toolbar, text="🔒 Protect Network", fg_color="#dc2626", hover_color="#b91c1c", command=protect_network)
+btn_reset = ctk.CTkButton(toolbar, text="🔓 Reset Password", fg_color="#f59e0b", hover_color="#d97706", command=reset_network_password)
 btn_csv   = ctk.CTkButton(toolbar, text="📄 Export CSV", fg_color=button_color, hover_color="#000000", command=export_csv)
 
-btn_start.grid(row=0, column=0, padx=(12, 8), pady=12)
-btn_stop.grid (row=0, column=1, padx=8, pady=12)
-btn_protect.grid(row=0, column=2, padx=8, pady=12)
-btn_csv.grid  (row=0, column=3, padx=8, pady=12)
+btn_info = ctk.CTkButton(toolbar, text="ℹ️ Security Info", fg_color="#6b7280", hover_color="#4b5563", command=show_security_info)
+
+btn_start.grid(row=0, column=0, padx=(12, 6), pady=12)
+btn_stop.grid (row=0, column=1, padx=6, pady=12)
+btn_protect.grid(row=0, column=2, padx=6, pady=12)
+btn_reset.grid(row=0, column=3, padx=6, pady=12)
+btn_info.grid(row=0, column=4, padx=6, pady=12)
+btn_csv.grid  (row=0, column=5, padx=6, pady=12)
 #=============================================
 
 # =====Main-Body================================
@@ -298,6 +359,16 @@ def scan_callback(a, b, c, network="Unknown"):
     # Privacy protection for unknown devices
     if vendor.lower() in ['unknown', '', 'n/a']:
         vendor = "🔒 Protected Identity"
+        # Show explanation popup for protected devices
+        app.after(0, lambda: messagebox.showinfo(
+            "Protected Device Detected",
+            f"Device {ip} shows as 'Protected Identity' because:\n\n"
+            f"• Device manufacturer is unknown/hidden\n"
+            f"• Router may be protecting device privacy\n"
+            f"• Device intentionally hides its identity\n"
+            f"• MAC address vendor lookup failed\n\n"
+            f"This is NORMAL for security-conscious devices."
+        ))
     
     device_key = f"{mac}_{network}"
     if device_key in seen:
