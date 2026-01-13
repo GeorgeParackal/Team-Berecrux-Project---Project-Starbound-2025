@@ -334,11 +334,10 @@ def insert_row(values):
 # ================= scan wiring (thread + callback) =================
 seen = set()
 counts = {"devices": 0, "active": 0}
+protected_popup_shown = False  # Flag to show popup only once
 
 def _update_status():
     status_label.configure(text=f"Devices: {counts['devices']} • Active: {counts['active']}")
-
-
 
 def _spinner_on():
     spinner.pack(side="right", padx=(6, 10), pady=6)
@@ -348,7 +347,6 @@ def _spinner_off():
     spinner.stop()
     spinner.pack_forget()
 
-
 def scan_callback(a, b, c, network="Unknown"):
     # ("error","scan_failed", msg) OR (mac, vendor, ip)
     if a == "error":
@@ -357,18 +355,22 @@ def scan_callback(a, b, c, network="Unknown"):
     mac, vendor, ip = a, b, c
     
     # Privacy protection for unknown devices
+    global protected_popup_shown
     if vendor.lower() in ['unknown', '', 'n/a']:
         vendor = "🔒 Protected Identity"
-        # Show explanation popup for protected devices
-        app.after(0, lambda: messagebox.showinfo(
-            "Protected Device Detected",
-            f"Device {ip} shows as 'Protected Identity' because:\n\n"
-            f"• Device manufacturer is unknown/hidden\n"
-            f"• Router may be protecting device privacy\n"
-            f"• Device intentionally hides its identity\n"
-            f"• MAC address vendor lookup failed\n\n"
-            f"This is NORMAL for security-conscious devices."
-        ))
+        # Show explanation popup only once per scan session
+        if not protected_popup_shown:
+            protected_popup_shown = True
+            app.after(0, lambda: messagebox.showinfo(
+                "Protected Devices Detected",
+                f"Some devices show as 'Protected Identity' because:\n\n"
+                f"• Device manufacturer is unknown/hidden\n"
+                f"• Router may be protecting device privacy\n"
+                f"• Device intentionally hides its identity\n"
+                f"• MAC address vendor lookup failed\n\n"
+                f"This is NORMAL for security-conscious devices.\n"
+                f"This message will only show once per scan."
+            ))
     
     device_key = f"{mac}_{network}"
     if device_key in seen:
@@ -407,8 +409,9 @@ def start_scan():
         messagebox.showwarning("No Networks", "No networks selected for scanning!")
         return
     
-    global current_networks
+    global current_networks, protected_popup_shown
     current_networks = networks
+    protected_popup_shown = False  # Reset popup flag for new scan
     
     _spinner_on()
     global stop_event, scan_thread
@@ -448,7 +451,6 @@ def on_close():
 btn_start.configure(command=start_scan)
 btn_stop.configure(command=stop_scan)
 app.protocol("WM_DELETE_WINDOW", on_close)
-# ================= end append block =================
 
 app.mainloop()
 
