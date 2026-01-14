@@ -1,25 +1,14 @@
 import threading, queue, tkinter as tk
-from tkinter import ttk, messagebox, simpledialog, filedialog
+from tkinter import ttk, messagebox, simpledialog
 import importlib, inspect, network_scan
-import time, json, os, hashlib, csv
+import time
+import json
+import os
+import hashlib
 
 # Force-reload scanner code
 importlib.reload(network_scan)
 run_scan = network_scan.run_scan
-
-# =========================
-# CONFIG
-# =========================
-APP_TITLE = "Multi-Network Scanner Pro v2.1"
-BG_DARK = "#2C3E50"
-CARD = "#34495E"
-ACCENT = "#3498DB"
-ACCENT_HOVER = "#2980B9"
-TEXT = "#ECF0F1"
-TEXT_MUTED = "#BDC3C7"
-SUCCESS = "#27AE60"
-DANGER = "#E74C3C"
-WARNING = "#F39C12"
 
 class MultiNetworkScanner:
     def __init__(self):
@@ -48,7 +37,8 @@ class MultiNetworkScanner:
     
     def show_disclaimer(self):
         """Show legal disclaimer"""
-        disclaimer = """⚠️ LEGAL DISCLAIMER ⚠️
+        disclaimer = """
+⚠️ LEGAL DISCLAIMER ⚠️
 
 This network scanner should ONLY be used on:
 • Networks you own
@@ -64,7 +54,8 @@ By clicking 'I Agree', you confirm:
 
 For unknown/protected devices:
 • Router manufacturers may not share device names for privacy
-• Some devices intentionally hide their identity for security"""
+• Some devices intentionally hide their identity for security
+        """
         
         result = messagebox.askyesno("Legal Disclaimer", disclaimer)
         if not result:
@@ -147,24 +138,12 @@ For unknown/protected devices:
         # Privacy protection for unknown devices
         if vendor.lower() in ['unknown', '', 'n/a']:
             vendor = "🔒 Protected Identity"
+            messagebox.showinfo(
+                "Privacy Notice", 
+                f"Device {ip} identity is protected.\nRouter manufacturers may hide device names for privacy/security."
+            )
         
         self.q.put((mac, vendor, ip, network or "Unknown"))
-    
-    def device_type_from_vendor(self, vendor):
-        """Determine device type from vendor"""
-        v = vendor.lower()
-        if "router" in v or "gateway" in v or "ubiquiti" in v:
-            return "🌐 Router"
-        elif "apple" in v:
-            return "🍎 Apple"
-        elif "samsung" in v:
-            return "📱 Samsung"
-        elif "protected" in v:
-            return "🔒 Protected"
-        elif "raspberry" in v:
-            return "🧪 Raspberry Pi"
-        else:
-            return "💻 Device"
     
     def poll_queue(self):
         """Process device queue"""
@@ -172,7 +151,18 @@ For unknown/protected devices:
             while True:
                 mac, vendor, ip, network = self.q.get_nowait()
                 
-                device_type = self.device_type_from_vendor(vendor)
+                # Determine device type
+                if "router" in vendor.lower() or "gateway" in vendor.lower():
+                    device_type = "🌐 Router"
+                elif "apple" in vendor.lower():
+                    device_type = "🍎 Apple"
+                elif "samsung" in vendor.lower():
+                    device_type = "📱 Samsung"
+                elif "protected" in vendor.lower():
+                    device_type = "🔒 Protected"
+                else:
+                    device_type = "💻 Device"
+                
                 device_key = f"{mac}_{network}"
                 
                 if device_key in self.known_devices:
@@ -225,13 +215,15 @@ For unknown/protected devices:
             if self.stop_event.is_set():
                 break
             
+            self.status_label.config(text=f"Scanning network: {network}")
+            
             # Modified callback to include network info
             def network_callback(mac, vendor, ip):
                 self.on_new_device(mac, vendor, ip, network)
             
-            # Run scan for this network
+            # Run scan for this network (simplified - you'd need to modify network_scan.py)
             try:
-                run_scan(network_callback, self.stop_event, target_network=network)
+                run_scan(network_callback, self.stop_event)
             except Exception as e:
                 print(f"Error scanning {network}: {e}")
     
@@ -243,56 +235,33 @@ For unknown/protected devices:
         self.stop_btn.config(state="disabled")
         self.update_progress()
     
-    def export_csv(self):
-        """Export device list to CSV"""
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
-        )
-        if not filename:
-            return
-        
-        try:
-            with open(filename, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Device Type", "MAC Address", "Vendor", "IP Address", "Network", "Status"])
-                
-                for item in self.tree.get_children():
-                    values = self.tree.item(item, "values")
-                    writer.writerow(values)
-            
-            messagebox.showinfo("Export Complete", f"Device list exported to {filename}")
-        except Exception as e:
-            messagebox.showerror("Export Error", f"Failed to export: {e}")
-    
     def update_progress(self):
         """Update progress bar"""
         if self.scan_thread and self.scan_thread.is_alive():
             self.progress_bar['mode'] = 'indeterminate'
             self.progress_bar.start(10)
             elapsed = time.time() - self.scan_start_time if self.scan_start_time else 0
-            self.status_var.set(f"Multi-network scanning... ({elapsed:.0f}s)")
+            self.status_label.config(text=f"Multi-network scanning... ({elapsed:.0f}s)", foreground="#2E8B57")
         else:
             self.progress_bar.stop()
             self.progress_bar['mode'] = 'determinate'
             self.progress_bar['value'] = 0
-            self.status_var.set("Scan stopped")
+            self.status_label.config(text="Scan stopped", foreground="#DC143C")
     
     def setup_gui(self):
         """Setup the GUI"""
         self.root = tk.Tk()
-        self.root.title(APP_TITLE)
-        self.root.geometry("1000x700")
-        self.root.configure(bg=BG_DARK)
+        self.root.title("Multi-Network Scanner Pro v2.1")
+        self.root.geometry("900x700")
+        self.root.configure(bg="#2C3E50")
         
         # Style configuration
         style = ttk.Style()
         style.theme_use('clam')
-        style.configure('Title.TLabel', font=('Arial', 16, 'bold'), background=BG_DARK, foreground=TEXT)
-        style.configure('Header.TFrame', background=CARD)
-        style.configure('Treeview', background=TEXT, foreground=BG_DARK, fieldbackground=TEXT)
-        style.configure('Treeview.Heading', background=ACCENT, foreground='white', font=('Arial', 10, 'bold'))
-        style.map('Treeview', background=[('selected', ACCENT)])
+        style.configure('Title.TLabel', font=('Arial', 16, 'bold'), background='#2C3E50', foreground='#ECF0F1')
+        style.configure('Header.TFrame', background='#34495E')
+        style.configure('Treeview', background='#ECF0F1', foreground='#2C3E50', fieldbackground='#ECF0F1')
+        style.configure('Treeview.Heading', background='#3498DB', foreground='white', font=('Arial', 10, 'bold'))
         
         # Header
         header_frame = ttk.Frame(self.root, style='Header.TFrame')
@@ -359,24 +328,19 @@ For unknown/protected devices:
         protect_btn = ttk.Button(button_frame, text="🔒 Protect Network", command=self.protect_network)
         protect_btn.pack(side='left', padx=(0, 10))
         
-        export_btn = ttk.Button(button_frame, text="📄 Export CSV", command=self.export_csv)
-        export_btn.pack(side='left', padx=(0, 10))
-        
         # Status bar
         status_frame = ttk.Frame(self.root)
         status_frame.pack(fill='x', side='bottom', padx=10, pady=(0, 10))
         
-        self.status_var = tk.StringVar(value="Ready for multi-network scan")
-        self.status_label = ttk.Label(status_frame, textvariable=self.status_var, font=('Arial', 9))
+        self.status_label = ttk.Label(status_frame, text="Ready for multi-network scan", font=('Arial', 9))
         self.status_label.pack(anchor='w')
         
-        self.device_count_var = tk.StringVar(value="Devices found: 0")
-        self.device_count_label = ttk.Label(status_frame, textvariable=self.device_count_var, font=('Arial', 9))
+        self.device_count_label = ttk.Label(status_frame, text="Devices found: 0", font=('Arial', 9))
         self.device_count_label.pack(anchor='e')
     
     def update_device_count(self):
         """Update device count"""
-        self.device_count_var.set(f"Devices found: {len(self.known_devices)}")
+        self.device_count_label.config(text=f"Devices found: {len(self.known_devices)}")
         if self.scan_thread and self.scan_thread.is_alive():
             self.update_progress()
         self.root.after(1000, self.update_device_count)
@@ -389,199 +353,4 @@ For unknown/protected devices:
 
 if __name__ == "__main__":
     app = MultiNetworkScanner()
-    app.run()_col(idx):
-    sel = tree.selection()
-    if not sel:
-        return
-    values = tree.item(sel[0], "values")
-    try:
-        root.clipboard_clear()
-        root.clipboard_append(values[idx])
-        status_var.set(f"Copied: {values[idx]}")
-    except Exception:
-        pass
-
-
-def ping_selected():
-    sel = tree.selection()
-    if not sel:
-        return
-    ip = tree.item(sel[0], "values")[3]
-    if not ip or ip == "—":
-        messagebox.showinfo("Ping", "No IP available to ping.")
-        return
-    # Open a terminal window with a ping command (best-effort, OS specific)
-    try:
-        if os.name == "nt":
-            os.system(f"start cmd /k ping {ip}")
-        elif sys.platform == "darwin":
-            os.system(f"open -a Terminal.app 'ping {ip}'")
-        else:
-            os.system(f"x-terminal-emulator -e ping {ip} || gnome-terminal -- ping {ip} || konsole -e ping {ip}")
-    except Exception:
-        messagebox.showinfo("Ping", "Couldn't launch a terminal. You can copy the IP and run ping manually.")
-
-
-
-def insert_or_update_device(mac, vendor, ip, now_ts):
-    device_type = device_type_from_vendor(vendor)
-    status_text = "Active"
-
-    if mac in known_devices:
-        iid = known_devices[mac]
-        cur = tree.item(iid, "values")
-        new_vals = (device_type, mac, vendor, ip, status_text)
-        if cur != new_vals:
-            tree.item(iid, values=new_vals, tags=("",))
-    else:
-        iid = tree.insert("", "end", values=(device_type, mac, vendor, ip, status_text))
-        known_devices[mac] = iid
-
-    last_seen[mac] = now_ts
-
-    # Alternating row backgrounds for readability
-    for i, child in enumerate(tree.get_children("")):
-        tags = list(tree.item(child, "tags"))
-        if i % 2 == 1:
-            if "alt" not in tags:
-                tags.append("alt")
-        else:
-            if "alt" in tags:
-                tags.remove("alt")
-        tree.item(child, tags=tuple(tags))
-
-
-
-def poll_queue():
-    # Pull everything quickly so UI stays snappy
-    try:
-        while True:
-            mac, vendor, ip, ts = q.get_nowait()
-            insert_or_update_device(mac, vendor, ip, ts)
-    except queue.Empty:
-        pass
-    root.after(QUEUE_POLL_MS, poll_queue)
-
-
-
-def refresh_statuses():
-    now = time.time()
-    # mark inactive if stale
-    for mac, iid in list(known_devices.items()):
-        seen = last_seen.get(mac, 0)
-        idle = now - seen
-        vals = list(tree.item(iid, "values"))
-        if idle > DEVICE_TTL:
-            if vals[-1] != "Inactive":
-                vals[-1] = "Inactive"
-                tree.item(iid, values=tuple(vals), tags=("inactive",))
-        else:
-            if vals[-1] != "Active":
-                vals[-1] = "Active"
-                tree.item(iid, values=tuple(vals), tags=("",))
-
-    # counters & progress
-    active = sum(1 for mac in known_devices if time.time() - last_seen.get(mac, 0) <= DEVICE_TTL)
-    count_var.set(f"Devices: {len(known_devices)}  •  Active: {active}")
-
-    if scan_thread and scan_thread.is_alive():
-        elapsed = int(time.time() - scan_start_time) if scan_start_time else 0
-        status_var.set(f"Scanning… {elapsed}s")
-    else:
-
-        status_var.set("Scan stopped" if scan_start_time else "Ready to scan network")
-
-    root.after(STATUS_REFRESH_MS, refresh_statuses)
-
-
-
-
-def export_csv():
-    if not known_devices:
-        messagebox.showinfo("Export", "No devices to export yet.")
-        return
-    path = filedialog.asksaveasfilename(
-        defaultextension=".csv",
-        filetypes=[("CSV", "*.csv")],
-        initialfile="network_devices.csv",
-    )
-    if not path:
-        return
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["Type", "MAC", "Vendor", "IP", "Status", "Last Seen (epoch)"])
-        for mac, iid in known_devices.items():
-            vals = tree.item(iid, "values")
-            w.writerow([*vals, int(last_seen.get(mac, 0))])
-    status_var.set(f"Exported to {os.path.basename(path)}")
-
-
-# =========================
-# Scan controls
-# =========================
-
-def start_scan():
-    global scan_thread, stop_event, scan_start_time
-
-    if scan_thread and scan_thread.is_alive():
-        return
-
-    # Fresh state but keep rows to visualize live updates; if you want a full reset, uncomment below
-    for child in tree.get_children(""):
-        tree.delete(child)
-    known_devices.clear()
-    last_seen.clear()
-
-    stop_event = threading.Event()
-    scan_start_time = time.time()
-
-    def runner():
-        try:
-            run_scan(on_new_device, stop_event)
-        except Exception as e:
-            q.put(("00:00:00:00:00:00", f"Scanner error: {e}", "—", time.time()))
-
-    scan_thread = threading.Thread(target=runner, name="network-scan", daemon=True)
-    scan_thread.start()
-
-    start_btn.configure(state="disabled")
-    stop_btn.configure(state="normal")
-
-
-def stop_scan():
-    global scan_thread
-    try:
-        if stop_event:
-            stop_event.set()
-    except Exception:
-        pass
-
-    start_btn.configure(state="normal")
-    stop_btn.configure(state="disabled")
-
-
-# Wire up buttons & events
-start_btn.configure(command=start_scan)
-stop_btn.configure(command=stop_scan)
-export_btn.configure(command=export_csv)
-
-tree.bind("<Button-3>", popup_menu)  # right-click
-
-# Start background loops
-root.after(QUEUE_POLL_MS, poll_queue)
-root.after(STATUS_REFRESH_MS, refresh_statuses)
-
-# Safety: stop scan when closing
-
-def on_close():
-    try:
-        if stop_event:
-            stop_event.set()
-    except Exception:
-        pass
-    root.destroy()
-
-root.protocol("WM_DELETE_WINDOW", on_close)
-
-# 🚨 Remember: only scan networks you own or have permission for.
-root.mainloop()
+    app.run()

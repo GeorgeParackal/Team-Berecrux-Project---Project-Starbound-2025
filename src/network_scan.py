@@ -13,7 +13,7 @@ except Exception:
     def _vendor(mac):
         return "unknown"
 
-def run_scan(callback=None, stop_event=None, interval=30):
+def run_scan(callback=None, stop_event=None, interval=30, target_network=None):
     """Continuously scan until stop_event is set."""
     try:
         count = 0
@@ -21,9 +21,13 @@ def run_scan(callback=None, stop_event=None, interval=30):
             if stop_event is not None and stop_event.is_set():
                 break
 
-            hostname = socket.gethostname()
-            host_ip_address = host_ip.get_local_ip_address()
-            network = str(IPv4Interface(host_ip_address + '/24').network)
+            # Use target network or detect current network
+            if target_network:
+                network = target_network
+            else:
+                hostname = socket.gethostname()
+                host_ip_address = host_ip.get_local_ip_address()
+                network = str(IPv4Interface(host_ip_address + '/24').network)
 
             try:
                 ans, _ = scapy.arping(network, timeout=2, retry=1, verbose=False)
@@ -61,6 +65,37 @@ def run_scan(callback=None, stop_event=None, interval=30):
 
     except KeyboardInterrupt:
         print(f"Program terminated, scan was ran: {count} times")
+
+def scan_multiple_networks(networks, callback=None, stop_event=None):
+    """Scan multiple networks sequentially"""
+    for network in networks:
+        if stop_event and stop_event.is_set():
+            break
+        
+        print(f"Scanning network: {network}")
+        
+        # Run single scan cycle for this network
+        try:
+            ans, _ = scapy.arping(network, timeout=2, retry=1, verbose=False)
+            
+            seen = set()
+            for _, rcv in ans:
+                if stop_event and stop_event.is_set():
+                    break
+                mac, ip = rcv.hwsrc, rcv.psrc
+                if (mac, ip) in seen:
+                    continue
+                seen.add((mac, ip))
+                vendor = _vendor(mac)
+                if callback:
+                    callback(mac, vendor, ip)
+                else:
+                    print(f"{network}: {mac} {vendor} {ip}")
+        
+        except Exception as e:
+            print(f"Error scanning {network}: {e}")
+            if callback:
+                callback("error", f"scan_failed_{network}", str(e))
 
 if __name__ == "__main__":
     run_scan()
